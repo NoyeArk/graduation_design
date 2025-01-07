@@ -17,8 +17,11 @@ url: https://pan.baidu.com/s/1BxW3bToTWNNStVtuOXinhw?pwd=1234
 code：1234 
 STEP 3:
 Run 'main.py' for the proposed method.
+
 **NOTE:**
-The main.py describes the hyper-parameter of the proposed method and the ablations, which can be summaried as follows:
+
+main.py 文件描述了所提出方法及其消融实验的超参数设置,具体如下:
+
 method_name:|tradeoff      |user_module|model_module|div_module
 SEM:        |tradeoff[data]|'SAtt'     |'dynamic'   |'cov'     |
 w/o uDC:    |tradeoff[data]|'static'   |'dynamic'   |'cov'     |

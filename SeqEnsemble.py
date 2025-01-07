@@ -265,14 +265,14 @@ class Model(object):
     
 
 class MetaData(object):
-    def __init__(self,args,data):
+    def __init__(self, args, data):
         self.args = args
         self.data = data
         self.n_user = self.data.entity_num['user']
         self.n_item = self.data.entity_num['item']
         self.pair2idx = {(line[0],line[1]):i for i,line in enumerate(data.dict_list['user_item'])}
         self.meta = []
-        for method in base_model:    
+        for method in base_model:
             load = np.load("./datasets/basemodel/%s/%s.npy"%(self.args.name,method))
             self.meta.append(load)
         meta = np.stack(self.meta,axis=1) #this 
@@ -476,6 +476,6 @@ def SEM_main(name,factor,batch_size,tradeoff,user_module,model_module,div_module
 
     args = parse_args(name,factor,batch_size,tradeoff,user_module,model_module,div_module,epoch,maxlen)
     data = Data(args,0)#获取数据
-    meta_data = MetaData(args,data)
+    meta_data = MetaData(args, data)
     session_DHRec = Train_MF(args,data,meta_data)
     session_DHRec.train()

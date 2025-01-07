@@ -22,8 +22,8 @@ batch_size = 2048
 for data in  ['Instant_Video','Amazon_App','Kindle','Clothing','Games','Grocery']:
     PFMC_main(data,factor,seed,batch_size,5)
     SASRec_main(data,factor,seed,batch_size)
-    Caser_main(data,factor,seed,batch_size)       
+    Caser_main(data,factor,seed,batch_size)
     FDSA_main(data,factor,seed,batch_size)
     ACF_main(data,factor,seed,batch_size)
-    HARNN_main(data,factor,seed,batch_size)  
+    HARNN_main(data,factor,seed,batch_size)
     ANAM_main(data,factor,seed,batch_size)

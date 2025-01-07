@@ -1,5 +1,4 @@
-
-#from diversity_evoluation import diversity
+# from diversity_evoluation import diversity
 from SeqEnsemble import SEM_main
 factor = 32
 seed = 0          

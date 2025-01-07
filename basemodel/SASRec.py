@@ -15,7 +15,7 @@ import copy
 from tqdm import tqdm 
 import scipy.sparse as sp
 from Train_module import Train_basic
-reuse=tf.AUTO_REUSE 
+reuse=tf.AUTO_REUSE
 def positional_encoding(dim, sentence_length, dtype=tf.float32):
 
     encoded_vec = np.array([pos/np.power(10000, 2*i/dim) for pos in range(sentence_length) for i in range(dim)])
