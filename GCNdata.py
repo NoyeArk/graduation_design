@@ -48,7 +48,10 @@ def build_sparse_matrix(n_1,n_2,list1):
     
 
 class Data(object):
-    def __init__(self,args,seed=0,Markov = False):
+    """
+    数据类
+    """
+    def __init__(self, args, seed=0, Markov=False):
         self.name_id = dict() 
         self.name = args.dataset
         self.dir = args.path if args.path[-1] == '/' else args.path + '/'
@@ -345,32 +348,3 @@ class Data(object):
             else:
                 ret.append(ui)
         return ret
-                
-                
-        
-        
-
-            
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

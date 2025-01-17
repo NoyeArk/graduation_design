@@ -8,11 +8,17 @@ import copy
 from tqdm import tqdm 
 import scipy.sparse as sp
 from utils import *
+
+
 N = 100 #这个N是为了取前多少个items的score，大于N的设为0.
-#basemodel
+
+# 基模型
 base_model = ['ACF','FDSA','HARNN','Caser','PFMC','SASRec','ANAM']
+
 #'ACF','FDSA','HARNN'都需要attribute信息，Caser','PFMC','SASRec'仅依赖于序列信息。
 print_train = False#是否输出train上的验证结果（过拟合解释）。
+
+
 def parse_args(name,factor,batch_size,tradeoff,user_module,model_module,div_module,epoch,maxlen):
     parser = argparse.ArgumentParser(description="Run .")  
     parser.add_argument('--name', nargs='?', default= name )    
@@ -39,11 +45,21 @@ def parse_args(name,factor,batch_size,tradeoff,user_module,model_module,div_modu
                         help='Specify an optimizer type (AdamOptimizer, AdagradOptimizer, GradientDescentOptimizer, MomentumOptimizer).')
     return parser.parse_args()
 
+
 class Model(object):
-    def __init__(self,args,data,hidden_factor, learning_rate, lamda_bilinear, optimizer_type):
-        # bind params to class
+    def __init__(self, args, data, hidden_factor, learning_rate, lamda_bilinear, optimizer_type):
+        """
+        初始化模型
+
+        Args:
+            args (`argparse.Namespace`): 参数
+            data (`Data`): 数据
+            hidden_factor (`int`): 隐藏因子
+            learning_rate (`float`): 学习率
+            lamda_bilinear (`float`): 正则化系数
+            optimizer_type (`str`): 优化器类型
+        """
         self.args = args
-        # bind params to class
         self.data = data
         self.n_user = self.data.entity_num['user']
         self.n_item = self.data.entity_num['item']
@@ -53,19 +69,20 @@ class Model(object):
         self.optimizer_type = optimizer_type
         self.n_k = len(base_model)
         self.n_p = self.args.maxlen
+
         # init all variables in a tensorflow graph
         self._init_graph()
 
     def _init_graph(self):
-        '''
-        Init a tensorflow Graph containing: input data, variables, model, loss, optimizer
-        '''
+        """
+        初始化tensorflow图
+        """
         tf.reset_default_graph()  # 重置默认图       
         self.graph = tf.Graph()
+
         with self.graph.as_default():  # , tf.device('/cpu:0'):
-            # Set graph level random seed
-            # Input data.
-            
+            # 设置图级别随机种子
+            # 输入数据
             self.weights = self._initialize_weights()
             self.u = tf.placeholder(tf.int32, shape=[None])
             self.i_pos = tf.placeholder(tf.int32, shape=[None])  
@@ -76,17 +93,18 @@ class Model(object):
             self.base_focus = tf.placeholder(tf.int32, shape=[None,self.n_k,self.n_p])
             self.times = tf.placeholder(tf.float32, shape=[None])
             self.is_training = tf.placeholder(tf.bool, shape=())            
-            
-            #pair interaction   
-            self.user_embed = tf.nn.embedding_lookup(self.weights['user_embeddings'],self.u) #[none,d]
-            self.condition = tf.to_float(tf.greater(tf.reduce_sum(self.meta_pos,axis=1),0))
-            # this is representation of base models (k) that consist top-p items (p) as their representations.
-                  
-            if self.args.user_module =='MC':   
+
+            # 用户嵌入
+            self.user_embed = tf.nn.embedding_lookup(self.weights['user_embeddings'], self.u) #[none,d]
+            # 条件
+            self.condition = tf.to_float(tf.greater(tf.reduce_sum(self.meta_pos,axis=1), 0))
+            # 这是基模型的表示（k），它们包含前p个项目（p）的表示
+
+            if self.args.user_module =='MC':
                 self.item_sequence_embs = tf.nn.embedding_lookup(self.weights['item_embeddings1'],self.input_seq)#[none,p,d]      
                 self.preference =   self.user_embed + tf.reduce_sum(self.item_sequence_embs,axis=1)
                 self.items_embs = self.weights['item_embeddings1']
-            if self.args.user_module =='GRU':  
+            if self.args.user_module =='GRU':
                 self.item_sequence_embs = tf.nn.embedding_lookup(self.weights['item_embeddings1'],self.input_seq)#[none,p,d]      
                 lstmCell = tf.contrib.rnn.GRUCell(self.hidden_factor)
                 value, preference = tf.nn.dynamic_rnn(lstmCell, self.item_sequence_embs, dtype=tf.float32)#[none,5,d]
@@ -119,12 +137,9 @@ class Model(object):
             self.score_negative = tf.reduce_sum(self.meta_neg * tf.expand_dims(self.wgts,axis=1),axis=-1)#none * NG
             self.loss_rec = self.pairwise_loss(self.score_positive,self.score_negative)
 
-                                
-                
             self.loss_reg = 0
             for wgt in tf.trainable_variables():
                 self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)      
-            
             
             if self.args.div_module == 'AEM-cov':
                 #AEM diversity
@@ -133,8 +148,6 @@ class Model(object):
                 cov_div1 =  tf.square(tf.reduce_sum(tf.expand_dims(self.model_emb,axis=1)*tf.expand_dims(self.model_emb,axis=2),axis=-1))
                 l2 = tf.reduce_sum(self.model_emb **2,axis=-1)#none* k 
                 cov_div2 = tf.matmul(tf.expand_dims(l2,axis=-1),tf.expand_dims(l2,axis=1))#none* k *k
-                
-                
                 
                 self.cov =cov_div1/ cov_div2#[none,k,k]           
             if self.args.div_module == 'cov':
@@ -147,7 +160,6 @@ class Model(object):
                 self.cov =  self.cov * coff               
                 
             self.loss_diversity = - self.args.tradeoff *  tf.reduce_sum(self.cov)
-            
             
             self.loss = self.loss_rec + self.loss_reg + self.loss_diversity
             if self.optimizer_type == 'AdamOptimizer':
@@ -164,21 +176,23 @@ class Model(object):
             self.sess = self._init_session()
             init = tf.global_variables_initializer()
             self.sess.run(init)
+
     def FFN(self,input_seq):
         mask = tf.expand_dims(tf.to_float(tf.not_equal(input_seq, -1)), -1)
         reuse = tf.AUTO_REUSE
         with tf.variable_scope("SASRec", reuse=reuse):
             # sequence embedding, item embedding table
-            self.seq, item_emb_table = embedding(input_seq,
-                                                 vocab_size=self.n_item + 1, #error?
-                                                 num_units=self.hidden_factor,
-                                                 zero_pad=True,
-                                                 scale=True,
-                                                 l2_reg=self.lamda_bilinear,
-                                                 scope="input_embeddings",
-                                                 with_t=True,
-                                                 reuse=reuse
-                                                 )
+            self.seq, item_emb_table = embedding(
+                input_seq,
+                vocab_size=self.n_item + 1,  # error?
+                num_units=self.hidden_factor,
+                zero_pad=True,
+                scale=True,
+                l2_reg=self.lamda_bilinear,
+                scope="input_embeddings",
+                with_t=True,
+                reuse=reuse
+            )
             self.item_emb_table = item_emb_table[1:]
 
             # Positional Encoding
@@ -202,11 +216,9 @@ class Model(object):
             self.seq *= mask
 
             # Build blocks
-
             for i in range(2):
                 with tf.variable_scope("num_blocks_%d" % i):
-
-                    # Self-attention
+                    # 自注意力
                     self.seq = multihead_attention(queries=normalize(self.seq),
                                                    keys=self.seq,
                                                    num_units=self.hidden_factor,
@@ -224,6 +236,7 @@ class Model(object):
             self.seq = normalize(self.seq)
         seq_emb = tf.reshape(self.seq, [tf.shape(input_seq)[0] , self.n_p, self.hidden_factor])
         return seq_emb
+
     def Hessian(self,x):
         return tf.abs(tf.nn.sigmoid(x) * (1- tf.nn.sigmoid(x)) * (1- 2 * tf.nn.sigmoid(x)))
 
@@ -234,10 +247,11 @@ class Model(object):
         config.gpu_options.per_process_gpu_memory_fraction = 0.9
         config.allow_soft_placement = True
         return tf.Session(config=config)
-    
+
     def _initialize_weights(self):
+        # 初始化权重
         all_weights = dict()
-        
+
         all_weights['user_embeddings'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_user, self.hidden_factor]),dtype = tf.float32) # features_M * K
         all_weights['item_embeddings1'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_item, self.hidden_factor]),dtype = tf.float32) # features_M * K
         all_weights['item_embeddings2'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_item, self.hidden_factor]),dtype = tf.float32) # features_M * K
@@ -246,7 +260,6 @@ class Model(object):
         all_weights['base_embeddings2'] =  tf.Variable(np.random.normal(0.0, 0.01,[1,self.n_k, self.hidden_factor]),dtype = tf.float32) # features_M * K
 
         return all_weights
-
 
     def partial_fit(self, data):  # fit a batch
         feed_dict = {self.u:data['u'],self.input_seq:data['seq'],self.i_pos:data['i_pos'],self.i_neg:data['i_neg'],self.times:data['times'],
@@ -262,7 +275,7 @@ class Model(object):
         _, self.prediction = self.sess.run(self.out_all_topk,feed_dict)     
         wgts = self.sess.run(self.wgts,feed_dict)     
         return self.prediction,wgts
-    
+
 
 class MetaData(object):
     def __init__(self, args, data):
@@ -291,6 +304,7 @@ class MetaData(object):
         for i in range(n):
             u_k_i[np.arange(len(u_k_i)),rank_chunk_reshape[:,i]] = 1/(i+10) 
         return np.reshape(u_k_i,[btch,k,self.n_item])     
+
     def label_positive(self):
         #返回正样本得分的函数        
         n_k = len(base_model)
@@ -302,6 +316,7 @@ class MetaData(object):
             torf = GT_item == rank_chunk_k
             label[np.sum(torf,axis=1)>0,k] = 1 / (10 + np.argwhere(torf)[:,1])
         return self.train_meta[:,0,:2],label
+
     def label_negative(self,neglist,NG):#neglist is 1-d list where each element denotes the negative item
         #返回负样本得分的函数        
         n_k = len(base_model)
@@ -337,18 +352,19 @@ class Train_MF(object):
              f.write("dataset:%s\n"%(args.name))
 
     def train(self):  # fit a dataset
-        #初始结果   
+        # 初始结果
         MAP_valid = 0
-        p=0
-        for epoch in range(0,self.epoch+1): #每一次迭代训练
-            #shuffle
+        p = 0
+        for epoch in range(0, self.epoch + 1):  # 每一次迭代训练
+            # shuffle
             shuffle = np.arange(len(self.meta_data.UI_positive))
-#            np.random.shuffle(shuffle)
-            #sample负样本采样
-            ui = self.meta_data.UI_positive #none * 2
-            self.u = ui[:,0]   
+            # np.random.shuffle(shuffle)
+            # 负采样
+            ui = self.meta_data.UI_positive  # none * 2
+            self.u = ui[:, 0]
             self.t = self.timestamp()
-#            positive samples
+
+            # 正采样
             self.i_pos = ui[:,1]
             
             NG = 1
@@ -392,6 +408,7 @@ class Train_MF(object):
                     result_print = init_test_TopK_test
         with open("./result.txt","a") as f:
             f.write("%s,%s,%s,%s,%s,%s,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f\n"%(self.args.name,self.args.model,self.args.user_module,self.args.model_module,self.args.div_module,self.args.tradeoff,result_print[0],result_print[1],result_print[2],result_print[3],result_print[4],result_print[5]))
+
     def sample_negative(self, u_i,meta_data,NG):  
         BM_train = self.data.dict_forward['train']
         M = 50
@@ -407,6 +424,7 @@ class Train_MF(object):
             sample.append(sample_i)
         
         return np.stack(sample,axis=-1)
+
     def timestamp(self):
         # infer timestamps
         t = np.ones(len(self.u))
@@ -443,7 +461,7 @@ class Train_MF(object):
             last_iteraction_block = last_iteraction[beg:end]
 #            items_score = test_score[beg:end]
             items_score = self.meta_data.all_score(test_meta[beg:end])
-            
+
             base_focus = test_meta[beg:end,:,2:2+self.n_p]
             self.score,self.wgts = self.model.topk(ui_block,last_iteraction_block,items_score,base_focus) #none * 50
             prediction = self.score 
@@ -453,13 +471,13 @@ class Train_MF(object):
                     user,item = line
                     n = 0 
                     for it in prediction[i]:
-                        if n> key -1:
+                        if n > key -1:
                             result_MAP[key].append(0.0)
                             result_NDCG[key].append(0.0)
                             result_PREC[key].append(0.0)  
-                            n=0
+                            n = 0
                             break
-                        elif it == item:   
+                        elif it == item:  # 如果预测的item与实际item相同
                             result_MAP[key].append(1.0)
                             result_NDCG[key].append(np.log(2)/np.log(n+2))
                             result_PREC[key].append(1/(n+1))
@@ -469,13 +487,37 @@ class Train_MF(object):
                             continue
                         else:
                             n = n + 1   
-        return  [np.mean(result_MAP[topk[0]]),np.mean(result_NDCG[topk[0]]),np.mean(result_PREC[topk[0]]),np.mean(result_MAP[topk[1]]),np.mean(result_NDCG[topk[1]]),np.mean(result_PREC[topk[1]])] 
+        return [np.mean(result_MAP[topk[0]]),np.mean(result_NDCG[topk[0]]),np.mean(result_PREC[topk[0]]),np.mean(result_MAP[topk[1]]),np.mean(result_NDCG[topk[1]]),np.mean(result_PREC[topk[1]])] 
 
-  
-def SEM_main(name,factor,batch_size,tradeoff,user_module,model_module,div_module,epoch,maxlen):
 
-    args = parse_args(name,factor,batch_size,tradeoff,user_module,model_module,div_module,epoch,maxlen)
-    data = Data(args,0)#获取数据
+def SEM_main(
+    name,
+    factor,
+    batch_size,
+    tradeoff,
+    user_module,
+    model_module,
+    div_module,
+    epoch,
+    maxlen
+):
+    """
+    主函数
+
+    Args:
+        name (`str`): 数据集名称
+        factor (`int`): 隐向量维度
+        batch_size (`int`): 批量大小
+        tradeoff (`float`): 权衡参数
+        user_module (`str`): 用户模块
+        model_module (`str`): 模型模块
+        div_module (`str`): 多样性模块
+        epoch (`int`): 训练轮数
+        maxlen (`int`): 最大序列长度
+    """
+    args = parse_args(name, factor, batch_size, tradeoff, user_module, model_module, div_module, epoch, maxlen)
+    print(args)
+    data = Data(args, 0)  # 获取数据
     meta_data = MetaData(args, data)
-    session_DHRec = Train_MF(args,data,meta_data)
+    session_DHRec = Train_MF(args, data, meta_data)
     session_DHRec.train()

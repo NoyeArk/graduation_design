@@ -220,6 +220,7 @@ def multihead_attention(queries,
     if with_qk: return Q,K
     else: return outputs
 
+
 def feedforward(inputs, 
                 num_units=[2048, 512],
                 scope="multihead_attention", 

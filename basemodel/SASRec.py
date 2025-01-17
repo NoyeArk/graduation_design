@@ -62,7 +62,8 @@ def embedding(inputs,
               scope="embedding", 
               with_t=False,
               reuse=None):
-    '''Embeds a given tensor.
+    '''
+    嵌入一个给定的张量。
 
     Args:
       inputs: A `Tensor` with type `int32` or `int64` containing the ids
@@ -452,22 +453,22 @@ class Train(Train_basic):
 
         PosSample_with_p5 = np.concatenate([PosSample,np.array([\
                     self.data.latest_interaction[(line[0],line[1])] for line in PosSample])],axis =1)#none*2+5
-        for epoch in tqdm(range(0,self.epoch+1)): #每一次迭代训练
+        
+        for epoch in tqdm(range(0,self.epoch+1)): # 每一次迭代训练
             np.random.shuffle(PosSample_with_p5)
-            #sample负样本采样
+            # sample负样本采样
             for user_chunk in toolz.partition_all(self.batch_size,[i for i in range(len(PosSample_with_p5))] ):                
                 chunk = list(user_chunk)
                 sample_chunk = PosSample_with_p5[chunk]
-                
+
                 u = sample_chunk[:,1] 
                 seq = sample_chunk[:,2:] 
                 seq[seq==-1]=0
                 pos = sample_chunk[:,1:6] 
                 pos[pos==-1]=0
                 neg = self.sample_negative(pos) 
-                
     
-                #meta-path feature
+                # meta-path feature
                 self.feed_dict = {'u':u,'seq':seq,'pos':pos,'neg':neg}
                 loss =  self.model.partial_fit(self.feed_dict)
     #                loss =  [0,0,0]
@@ -492,7 +493,7 @@ class Train(Train_basic):
 def SASRec_main(name,factor,seed,batch_size):       
 #name,factor,Topk,seed ,batch_size = 'Amazon_App',128,10,0,2048
     args = parse_args(name,factor,seed,batch_size)
-    data = Data(args,seed)#获取数据
+    data = Data(args, seed)#获取数据
     session_DHRec = Train(args,data,SASREC)
     session_DHRec.train()
     # 

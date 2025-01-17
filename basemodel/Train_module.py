@@ -25,41 +25,50 @@ class Train_basic(object):
         self.n_user = self.data.entity_num['user']
         self.n_item = self.data.entity_num['item']
         self.include_valid = include_valid
-    def train(self):  # fit a dataset
-        # Check Init performance
-        #初始结果   
+
+    def train(self):
+        """
+        训练模型
+        """
+        # 检查初始性能，初始结果 
         MAP_valid = 0
-        if include_valid ==True:
-            PosSample = np.array(self.data.train) # Array形式的二元组（user,item），none * 2
+        if include_valid == True:
+            PosSample = np.array(self.data.train)  # Array形式的二元组（user,item），none * 2
             basemodel = 'basemodel_v'
         else:
             basemodel = 'basemodel'
-            PosSample = np.array(self.data.train + self.data.valid) # Array形式的二元组（user,item），none * 2
+            PosSample = np.array(self.data.train + self.data.valid)  # Array形式的二元组（user,item），none * 2
 
-        PosSample_with_p5 = np.concatenate([PosSample,np.array([\
-                    self.data.latest_interaction[(line[0],line[1])] for line in PosSample])],axis =1)#none*2+5
-        for epoch in tqdm(range(0,self.epoch+1)): #每一次迭代训练
+        PosSample_with_p5 = np.concatenate([
+            PosSample,
+            np.array([self.data.latest_interaction[(line[0], line[1])] for line in PosSample])
+        ], axis=1)  # none*2+5
+
+        for epoch in tqdm(range(0, self.epoch+1)):  # 每一次迭代训练
             np.random.shuffle(PosSample)
-            #sample负样本采样
-            NG = 1#NG倍举例
-            NegSample = self.sample_negative(PosSample,NG)#采样，none * NG
-            for user_chunk in toolz.partition_all(self.batch_size,[i for i in range(len(PosSample))] ):                
+            # sample负样本采样
+            NG = 1  # NG倍举例
+            NegSample = self.sample_negative(PosSample, NG)  # 采样，none * NG
+
+            for user_chunk in toolz.partition_all(self.batch_size, [i for i in range(len(PosSample))]):                
                 chunk = list(user_chunk)
-                neg_chunk = np.array(NegSample[chunk],dtype = np.int)[:,0]#none*1
-                train_chunk_p5 = PosSample_with_p5[chunk]#none*2+5
+                neg_chunk = np.array(NegSample[chunk], dtype=np.int)[:,0]  # none*1
+                train_chunk_p5 = PosSample_with_p5[chunk]  # none*2+5
                 train_chunk_p5_copy = copy.deepcopy(train_chunk_p5)            
                 train_chunk_p5_copy[:,1] = neg_chunk
                     
-                feedback = np.stack([train_chunk_p5,train_chunk_p5_copy],axis=1)
-                feedback = np.reshape(feedback,[-1,2+5])
-                labels = np.reshape(np.stack([np.ones(len(chunk)),np.zeros(len(chunk))],axis=1),[-1,1])
-                #meta-path feature
-                self.feed_dict = {'feedback':feedback,'labels':labels}
-                loss =  self.model.partial_fit(self.feed_dict)
+                feedback = np.stack([train_chunk_p5, train_chunk_p5_copy], axis=1)
+                feedback = np.reshape(feedback, [-1, 2 + 5])
+                labels = np.reshape(np.stack([np.ones(len(chunk)), np.zeros(len(chunk))], axis=1), [-1, 1])
+
+                # meta-path feature
+                self.feed_dict = {'feedback': feedback, 'labels': labels}
+                loss = self.model.partial_fit(self.feed_dict)
+            
             t2 = time()
 
-         # evaluate training and validation datasets
-            if epoch % int(self.args.epoch/10) == 0:
+            # 评估训练和验证数据集
+            if epoch % int(self.args.epoch / 10) == 0:
                 for topk in [10]:
                     init_test_TopK_test = self.evaluate_TopK(self.data.test,topk) 
                     print("Epoch %d Top%d \t TEST SET:%.4f MAP:%.4f,NDCG:%.4f,PREC:%.4f;[%.1f s]\n"
@@ -74,6 +83,7 @@ class Train_basic(object):
                         os.makedirs(dir_name)
                     np.save("../datasets/%s/%s/%s.npy"%(basemodel,self.args.name,self.args.model),self.meta_result )
                     break
+
     def train_attribute(self):  # fit a dataset
         MAP_valid = 0
         if include_valid ==True:
@@ -194,9 +204,9 @@ class Train_basic(object):
             last_iteraction_block = last_iteraction[_*num:(_+1)*num]
             feedback_block = np.concatenate((user_item_block,last_iteraction_block),axis=1)
             try: 
-                prediction= self.model.topk(feedback_block,self.item_attributes) #none * 50
+                prediction = self.model.topk(feedback_block, self.item_attributes) #none * 50
             except:
-                prediction= self.model.topk(feedback_block) #none * 50
+                prediction = self.model.topk(feedback_block) #none * 50
 
                 
             assert len(prediction) == len(feedback_block)

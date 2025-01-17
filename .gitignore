@@ -1,1 +1,6 @@
+__pycache__/
 datasets/
+basemodel/Kindle/ratings.data
+basemodel/Kindle/ACF.npy
+basemodel/Kindle/IG.data
+basemodel/Kindle/feature.data
