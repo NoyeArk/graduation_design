@@ -515,7 +515,17 @@ def SEM_main(
         epoch (`int`): 训练轮数
         maxlen (`int`): 最大序列长度
     """
-    args = parse_args(name, factor, batch_size, tradeoff, user_module, model_module, div_module, epoch, maxlen)
+    args = parse_args(
+        name,
+        factor,
+        batch_size,
+        tradeoff,
+        user_module,
+        model_module,
+        div_module,
+        epoch,
+        maxlen
+    )
     print(args)
     data = Data(args, 0)  # 获取数据
     meta_data = MetaData(args, data)

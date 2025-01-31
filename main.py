@@ -54,6 +54,7 @@ maxlen = {
 
 # 运行示例
 data = 'Kindle'
+
 SEM_main(
     name=data,
     factor=factor,

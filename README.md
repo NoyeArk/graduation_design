@@ -10,7 +10,7 @@
 
 ### STEP 1
 
-从百度网盘下载数据集，并解压到'/datasets/'路径下
+从百度网盘下载数据集，并解压到 '/datasets/' 路径下
 
 链接: https://pan.baidu.com/s/1E5q9zbVYdaXFD_CoYHeOBg?pwd=1234
 
