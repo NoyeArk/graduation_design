@@ -158,12 +158,10 @@ class Train_basic(object):
         score = np.array(score,dtype=np.int)
         return np.concatenate((candidate,score),axis=1)
         
-            
-        
     def sample_negative(self, data,num=10):
         samples = np.random.randint( 0,self.n_item,size = (len(data),num))
-
         return samples
+
     def collect_attributes(self):
         #return item * 
         NUM = 3
@@ -207,7 +205,6 @@ class Train_basic(object):
                 prediction = self.model.topk(feedback_block, self.item_attributes) #none * 50
             except:
                 prediction = self.model.topk(feedback_block) #none * 50
-
                 
             assert len(prediction) == len(feedback_block)
 #            print(_)
@@ -219,11 +216,11 @@ class Train_basic(object):
                     if n> topk -1:
                         result_MAP.append(0.0)
                         result_NDCG.append(0.0)
-                        result_PREC.append(0.0)  
-                        n=0
+                        result_PREC.append(0.0)
+                        n = 0
                         break
-                    elif it == item:   
-#                        print([it,item])
+                    elif it == item:
+                        # print([it,item])
                         result_MAP.append(1.0)
                         result_NDCG.append(np.log(2)/np.log(n+2))
                         result_PREC.append(1/(n+1))
@@ -234,4 +231,4 @@ class Train_basic(object):
                     else:
                         n = n + 1   
         print(np.sum(result_MAP))
-        return  [np.mean(result_MAP),np.mean(result_NDCG),np.mean(result_PREC)] 
+        return  [np.mean(result_MAP),np.mean(result_NDCG),np.mean(result_PREC)]

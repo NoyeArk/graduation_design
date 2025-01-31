@@ -53,21 +53,42 @@ def build_sparse_matrix(n_1, n_2, list1):
 
 
 class Data(object):
+    """
+    数据处理类，用于处理和准备图神经网络所需的数据。
+
+    属性:
+        name_id (`dict`): 实体名称到ID的映射字典
+        name (`str`): 数据集名称
+        dir (`str`): 数据文件路径
+        encoding (`str`): 文件编码格式
+        entity (`list`): 实体类型列表，如['user','item','G']
+        user_side_entity (`list`): 用户侧实体类型列表
+        item_side_entity (`list`): 物品侧实体类型列表
+        drop_user (`int`): 用户交互数阈值，少于此值的用户将被过滤
+        drop_item (`int`): 物品交互数阈值，少于此值的物品将被过滤
+        dict_entity2id (`dict`): 各实体到ID的映射字典
+        dict_list (`dict`): 实体间关系的二元组列表字典
+        dict_forward (`dict`): 实体间正向关系字典
+        dict_reverse (`dict`): 实体间反向关系字典
+        entity_num (`dict`): 各类实体的数量统计
+    """
     def __init__(self, args, seed=0, Markov=False):
         self.name_id = dict()
         self.name = args.dataset
         self.dir = args.path if args.path[-1] == '/' else args.path + '/'
+
         if args.name in ['CiaoDVD', 'dianping']:
             self.encoding = 'utf-8'
         else:
             self.encoding = 'iso-8859-15'
-        if self.name in ['Amazon_App','Games','ml1m']:
+
+        if self.name in ['Amazon_App', 'Games', 'ml1m']:
             self.entity = ['user','item','G']#'C',
             self.user_side_entity = []
             self.item_side_entity = ['G']#'C'
             self.drop_user, self.drop_item = 10, 10
         if self.name in ['Grocery']:
-            self.entity = ['user','item','G']#'C',
+            self.entity = ['user', 'item', 'G']#'C',
             self.user_side_entity = []
             self.item_side_entity = ['G']#'C'
             self.drop_user, self.drop_item = 20, 20          
@@ -93,7 +114,7 @@ class Data(object):
         self.dict_forward = dict()#dict entity1_entity2对应的关系字典
         self.dict_reverse = dict()
         self.entity_num = dict()#数量
-        # read rating and split train and test set     
+        # read rating and split train and test set
         #Remove user，item，which their number is less than 5 interaction。
         self.dict_list['user_item'], self.entity_num['user'], self.entity_num['item'],\
         self.dict_entity2id['user'], self.dict_entity2id['item'] = self._get_rating(remove_rating,self.drop_user,self.drop_item)#53
@@ -110,10 +131,7 @@ class Data(object):
 
         self.markov = self.constrcut_markov_matrices()
         
-        
 #        business to others and set thier forward and reverse dictionary
-
-
 #        if self.name in ['ML','CiaoDVD','Amazon_App','dianping']: 
         for entity in self.item_side_entity:
             self.dict_list['item_'+entity],self.dict_entity2id[entity],self.entity_num[entity] = self.get_b_other('I'+entity+'.data')
@@ -166,11 +184,11 @@ class Data(object):
             else:
                 test.append([user,item])
             try:
-                if u_i[i+1][0] != user:
-                    n = 0                  
+                if u_i[i + 1][0] != user:
+                    n = 0
             except:
                 pass
-        return train,valid,test
+        return train, valid, test
 
     def find_latest_interaction(self,u_i,keep = last):
         result = dict()
@@ -184,9 +202,9 @@ class Data(object):
                     latest = copy.deepcopy(init)
                 else:
                     latest.append(item)
-                
+
         return result
-    
+
     def _get_rating(self,score,remove_less_than1,remove_less_than2,keep_interaction = -1):
         file_path = self.dir + 'ratings.data'
         df = pd.read_csv(file_path,sep='\t',header = None,nrows =leave_num)
@@ -194,11 +212,11 @@ class Data(object):
         df = df.sort_values(['user','time']) # sort for user and time
         #remv ratings
         df = df[df['rating']>score]
-        
+
         u_i = df[['user','item']].values.tolist()
         u_i = [list(map(str,line)) for line in u_i]
         #re
-        
+
         us,bs = zip(*u_i)
         us_list = []
         bs_list = []
@@ -214,7 +232,7 @@ class Data(object):
         user2id, item2id = reverse_and_map(us_list), reverse_and_map(bs_list)
         self.name_id['item'] = item2id
         return np.array(remove_unrating_user_and_rename(user2id,item2id, u_i)),num_user, num_item,user2id, item2id
-    
+
     def get_b_other(self,subdir):
         b_other = []
         file_path = self.dir + subdir
@@ -233,7 +251,7 @@ class Data(object):
         others2id = reverse_and_map(others)
         self.name_id[subdir] = others2id
         return remove_unrating_user_and_rename(self.dict_entity2id['item'],others2id,b_other) , others2id,len(others)    
-    
+
     def get_u_other(self,subdir):
         b_other = []
         file_path = self.dir + subdir
