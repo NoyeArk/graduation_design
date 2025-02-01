@@ -1,14 +1,14 @@
 import copy
 import codecs
 import numpy as np
-import pandas as pd 
+import pandas as pd
 from tqdm import tqdm
 from collections import Counter
-from scipy.sparse import csr_matrix, coo_matrix,lil_matrix, save_npz
+from scipy.sparse import csr_matrix, coo_matrix, lil_matrix, save_npz
 
 leave_num = 1000000000
 remove_rating = 3.5
-last = 10# 5for BMS;10for SNR
+last = 10  # 5 for BMS; 10 for SNR
 
 
 def relation_dict(n1, n2, list1):
@@ -73,11 +73,22 @@ def set_forward(dict1):
     return return_1
 
 
-def build_sparse_matrix(n_1,n_2,list1):
-    res = lil_matrix((n_1,n_2))
-    for user in list1.keys():
-        for item in list1[user]:
-            res[user,item] =1
+def build_sparse_matrix(user_num, item_num, user_item):
+    """
+    构建用户-物品的稀疏矩阵
+
+    Args:
+        user_num (`int`): 用户数量
+        item_num (`int`): 物品数量
+        user_item (`list`): 用户-物品对
+
+    Returns:
+        lil_matrix: 稀疏矩阵
+    """
+    res = lil_matrix((user_num, item_num))
+    for user in user_item.keys():
+        for item in user_item[user]:
+            res[user, item] =1
     return res
 
 
@@ -199,37 +210,74 @@ class Data(object):
             self.dict_list['item_' + entity], \
             self.dict_entity2id[entity], \
             self.entity_num[entity] = self.get_item_entity_pairs('I' + entity + '.data')
-            self.dict_forward['item_' + entity] = relation_dict(self.entity_num['item'],self.entity_num[entity], self.dict_list['item_'+entity])
+            self.dict_forward['item_' + entity] = relation_dict(
+                self.entity_num['item'],
+                self.entity_num[entity],
+                self.dict_list['item_' + entity]
+            )
         for entity in self.user_side_entity:
-            self.dict_list['user_' + entity],self.dict_entity2id[entity],self.entity_num[entity] = self.get_u_other('U'+entity+'.data')
-            self.dict_forward['user_' + entity] = relation_dict(self.entity_num['user'],self.entity_num[entity], self.dict_list['user_'+entity])
+            self.dict_list['user_' + entity], \
+            self.dict_entity2id[entity], \
+            self.entity_num[entity] = self.get_u_other('U' + entity + '.data')
+            self.dict_forward['user_' + entity] = relation_dict(
+                self.entity_num['user'],
+                self.entity_num[entity],
+                self.dict_list['user_' + entity]
+            )
 
         # 构建实体-实体的稀疏矩阵
         # user-item
         self.matrix = dict()
-        self.matrix['user_item'] = build_sparse_matrix(self.entity_num['user'],self.entity_num['item'],self.dict_forward['train'])
+        self.matrix['user_item'] = build_sparse_matrix(
+            self.entity_num['user'],
+            self.entity_num['item'],
+            self.dict_forward['train']
+        )
         self.matrix['item_user'] = self.matrix['user_item'].transpose()
 
         # 构建用户-其他实体的稀疏矩阵
         for entity in self.user_side_entity:
-            self.matrix['user'+entity]  =  build_sparse_matrix(self.entity_num['user'],self.entity_num[entity],self.dict_forward['user_'+entity])
-            self.matrix[entity+'user']  =  self.matrix['user'+entity].transpose()
-        #item - ?
+            self.matrix['user' + entity] = build_sparse_matrix(
+                self.entity_num['user'],
+                self.entity_num[entity],
+                self.dict_forward['user_' + entity]
+            )
+            self.matrix[entity + 'user'] = self.matrix['user' + entity].transpose()
+        # 构建物品-其他实体的稀疏矩阵
         for entity in self.item_side_entity:
-            self.matrix['item'+entity]  =  build_sparse_matrix(self.entity_num['item'],self.entity_num[entity],self.dict_forward['item_'+entity])
-            self.matrix[entity+'item']  =  self.matrix['item'+entity].transpose()
+            self.matrix['item' + entity] = build_sparse_matrix(
+                self.entity_num['item'],
+                self.entity_num[entity],
+                self.dict_forward['item_' + entity]
+            )
+            self.matrix[entity + 'item'] = self.matrix['item' + entity].transpose()
         # self.set_forward = dict()
         # for key in self.dict_forward.keys():
         self.set_forward = set_forward(self.dict_forward)
-        print('user:%d\t item:%d\t train:%d\t'%(self.entity_num['user'], self.entity_num['item'],len(self.train)))
-        if self.name in ['Grocery','Kindle','Games']:
+        print(
+            f'user: {self.entity_num["user"]}\t'
+            f'item: {self.entity_num["item"]}\t'
+            f'train: {len(self.train_set)}'
+        )
+        if self.name in ['Grocery', 'Kindle', 'Games']:
             self.pic = self.pic_feature('feature.npy')
         if self.name in ['tiktok']:
-            self.pic = self.pic_feature('visual.npy')     
+            self.pic = self.pic_feature('visual.npy')
             self.acou = self.pic_feature('acoustic.npy')
 
     def split_dataset(self, user_item, ratio=[0.6, 0.8]):
-        """分割训练、验证和测试集"""
+        """
+        分割训练、验证和测试集
+
+        Args:
+            user_item (`list`): 用户-物品对
+            ratio (`list`): 分割比例
+
+        Returns:
+            train_set (`list`): 训练集
+            valid_set (`list`): 验证集
+            test_set (`list`): 测试集
+        """
         user_count = Counter(user_item[:, 0])
         train_set, valid_set, test_set = [], [], []
         n = 0
@@ -411,27 +459,19 @@ class Data(object):
             pic_feature (`numpy.ndarray`): 物品的图片特征
         """
         pic_feature = np.zeros([self.entity_num['item'],dims])
-        #read feature
-        file_path = self.dir + name#'feature.npy'
+        # read feature
+        file_path = self.dir + name  # 'feature.npy'
         feature = np.load(file_path)
-        #read items rank
-        with codecs.open(self.dir + 'feature.data','r',encoding=self.encoding) as rfile:#iso-8859-15
+        # read items rank
+        with codecs.open(self.dir + 'feature.data','r',encoding=self.encoding) as rfile:  # iso-8859-15
             for line in rfile:
-                line = line.strip().split('\t') 
+                line = line.strip().split('\t')
                 item = line[0]
                 idx =int(line[1])
                 if item in self.dict_entity2id['item']:
                     pic_feature[self.dict_entity2id['item'][item]] = feature[idx]
         return pic_feature
-        
-#                if self.name in ['ml100k']:
-#                    line = line.strip().split(',')   
-#                if self.name in ['ML', 'CiaoDVD','Amazon_App','dianping']:
-#                    line = line.strip().split('\t')  
-#                if (len(line)!=2):
-#                    print(line)
-#                b_other.append([str(line[0]),str(line[1])])
-#        
+
     def holdout_users(self,test,n):
 #        us,bs = zip(*test)
 #        C_us = Counter(us)

@@ -30,7 +30,7 @@ class Train_basic(object):
         """
         训练模型
         """
-        # 检查初始性能，初始结果 
+        # 检查初始性能，初始结果
         MAP_valid = 0
         if include_valid == True:
             PosSample = np.array(self.data.train)  # Array形式的二元组（user,item），none * 2
@@ -52,9 +52,9 @@ class Train_basic(object):
 
             for user_chunk in toolz.partition_all(self.batch_size, [i for i in range(len(PosSample))]):                
                 chunk = list(user_chunk)
-                neg_chunk = np.array(NegSample[chunk], dtype=np.int)[:,0]  # none*1
+                neg_chunk = np.array(NegSample[chunk], dtype=np.int64)[:,0]  # none*1
                 train_chunk_p5 = PosSample_with_p5[chunk]  # none*2+5
-                train_chunk_p5_copy = copy.deepcopy(train_chunk_p5)            
+                train_chunk_p5_copy = copy.deepcopy(train_chunk_p5)        
                 train_chunk_p5_copy[:,1] = neg_chunk
                     
                 feedback = np.stack([train_chunk_p5, train_chunk_p5_copy], axis=1)
@@ -64,7 +64,7 @@ class Train_basic(object):
                 # meta-path feature
                 self.feed_dict = {'feedback': feedback, 'labels': labels}
                 loss = self.model.partial_fit(self.feed_dict)
-            
+
             t2 = time()
 
             # 评估训练和验证数据集
@@ -102,7 +102,7 @@ class Train_basic(object):
             NegSample = self.sample_negative(PosSample,NG)#采样，none * NG
             for user_chunk in toolz.partition_all(self.batch_size,[i for i in range(len(PosSample))] ):                
                 chunk = list(user_chunk)
-                neg_chunk = np.array(NegSample[chunk],dtype = np.int)#none*1
+                neg_chunk = np.array(NegSample[chunk],dtype = np.int64)#none*1
                 train_chunk_p5 = PosSample_with_p5[chunk]#none*2+5
                 train_chunk_p5_copy = copy.deepcopy(train_chunk_p5)            
                 train_chunk_p5_copy[:,1] = neg_chunk
@@ -155,7 +155,7 @@ class Train_basic(object):
             
             score_block = score_block[:,:100].tolist()
             score.extend(score_block) 
-        score = np.array(score,dtype=np.int)
+        score = np.array(score,dtype=np.int64)
         return np.concatenate((candidate,score),axis=1)
         
     def sample_negative(self, data,num=10):

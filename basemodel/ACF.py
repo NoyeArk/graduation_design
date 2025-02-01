@@ -16,6 +16,8 @@ from tqdm import tqdm
 import scipy.sparse as sp
 from Train_module import Train_basic
 
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 
 NUM = 3
@@ -44,7 +46,7 @@ def parse_args(name,factor,seed,batch_size):
     return parser.parse_args()
 
 class ACF(object):
-    def __init__(self,args,data,hidden_factor, learning_rate, lamda_bilinear, optimizer_type):
+    def __init__(self, args, data, hidden_factor, learning_rate, lamda_bilinear, optimizer_type):
         # bind params to class
         self.args = args
         # bind params to class
@@ -66,7 +68,7 @@ class ACF(object):
         '''
         Init a tensorflow Graph containing: input data, variables, model, loss, optimizer
         '''
-        tf.reset_default_graph()  # 重置默认图       
+        tf.compat.v1.reset_default_graph()  # 重置默认图
         self.graph = tf.Graph()
         with self.graph.as_default():  # , tf.device('/cpu:0'):
             # Set graph level random seed
@@ -130,27 +132,21 @@ class ACF(object):
             #pair interaction
             self.out = tf.reduce_sum( self.item_embedddings * self.preference,axis=-1,keep_dims=True) #none * 1            
             self.loss_rec = self.pairwise_loss(self.out,self.labels)
-            
 
-            
             self.loss_reg = 0
             for wgt in tf.trainable_variables():
                 self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)      
 
-                
-
             self.loss = self.loss_rec + self.loss_reg 
             if self.optimizer_type == 'AdamOptimizer':
                 self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-            
+
 #                self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
 #                grads = self.optimizer.compute_gradients(self.loss)
 #                for i, (g, v) in enumerate(grads):
 #                    if g is not None:
 #                        grads[i] = (tf.clip_by_norm(g, 10), v)  # clip gradients
 #                self.train_op = self.optimizer.apply_gradients(grads)    
-#                                
-#                
                 
             elif self.optimizer_type == 'AdagradOptimizer':
                 self.optimizer = tf.train.AdagradOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
@@ -178,7 +174,7 @@ class ACF(object):
         all_weights['user_embeddings'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_user, self.hidden_factor]),dtype = tf.float32) # features_M * K
         all_weights['item_embeddings1'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_item, self.hidden_factor]),dtype = tf.float32) # features_M * K
         all_weights['item_embeddings2'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_item, self.hidden_factor]),dtype = tf.float32) # features_M * K
-        with tf.variable_scope('attributes'):
+        with tf.name_scope('attributes'):
 #            all_weights['attributes_att'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_attribute, self.hidden_factor]),dtype = tf.float32) # features_M * K
 
             all_weights['attribute_embeddings'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.num_a, self.hidden_factor]),dtype = tf.float32) # features_M * K
@@ -212,6 +208,7 @@ class Train(Train_basic):
         super(Train,self).__init__(args,data)
         self.item_attributes = self.collect_attributes()
         self.model = ACF(self.args,self.data ,args.hidden_factor,args.lr, args.lamda, args.optimizer)
+
     def sample_negative(self, data,num=10):
         samples = np.random.randint( 0,self.n_item,size = (len(data)))
         return samples

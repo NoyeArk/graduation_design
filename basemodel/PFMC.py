@@ -12,6 +12,8 @@ import tensorflow as tf
 from GCNdata import Data
 from Train_module import Train_basic
 
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 def parse_args(name, factor, seed, batch_size, n=5):
     """
@@ -193,9 +195,11 @@ class PFMC(object):
             loss_rec (`float`): 正样本的损失。
             loss_reg (`float`): 正则化损失。
         """
-        print('数据:', data.keys(), len(data['feedback']), len(data['labels']))
         feed_dict = {self.feedback: data['feedback'], self.labels: data['labels']}
-        loss_rec,loss_reg, opt = self.sess.run((self.loss_rec, self.loss_reg, self.optimizer), feed_dict=feed_dict)
+        loss_rec, loss_reg, opt = self.sess.run(
+            (self.loss_rec, self.loss_reg, self.optimizer),
+            feed_dict=feed_dict
+        )
         return loss_rec, loss_reg
 
     def pairwise_loss(self,inputx,labels):
@@ -209,7 +213,7 @@ class PFMC(object):
 
     def topk(self,user_item_feedback):
         feed_dict = {self.feedback: user_item_feedback}
-        _, self.prediction = self.sess.run(self.out_all_topk,feed_dict)     
+        _, self.prediction = self.sess.run(self.out_all_topk,feed_dict)
         return self.prediction
 
 

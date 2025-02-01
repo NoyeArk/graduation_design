@@ -15,6 +15,10 @@ import copy
 from tqdm import tqdm 
 import scipy.sparse as sp
 from Train_module import Train_basic
+
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+
 def parse_args(name,factor,Topk,seed,batch_size):
     parser = argparse.ArgumentParser(description="Run .")  
     parser.add_argument('--name', nargs='?', default= name )    
@@ -42,7 +46,7 @@ def parse_args(name,factor,Topk,seed,batch_size):
     return parser.parse_args()
 
 class Caser(object):
-    def __init__(self,args,data,hidden_factor, learning_rate, lamda_bilinear, optimizer_type):
+    def __init__(self, args, data, hidden_factor, learning_rate, lamda_bilinear, optimizer_type):
         # bind params to class
         self.args = args
         # bind params to class
@@ -80,7 +84,7 @@ class Caser(object):
             self.is_training = tf.placeholder(tf.bool)
                                                  
             # user and item embeddings
-            initializer = tf.contrib.layers.xavier_initializer()
+            initializer = tf.keras.initializers.glorot_normal()
             self.user_embeddings = tf.Variable(initializer([self.num_users, self.dims]))
             self.item_embeddings = tf.Variable(initializer([self.num_items, self.dims]))
             
@@ -95,12 +99,12 @@ class Caser(object):
             
             # vertical convolution layers
             if self.n_v:
-                out_v = tf.layers.conv2d(item_embs, 
-                                         self.n_v, 
-                                         [self.L, 1], 
+                out_v = tf.layers.conv2d(item_embs,
+                                         self.n_v,
+                                         [self.L, 1],
                                          activation=tf.nn.relu)
-                out_v = tf.contrib.layers.flatten(out_v)
-                
+                out_v = tf.layers.flatten(out_v)
+
             # horizontal convolution layers
             out_hs = list()
             if self.n_h:
@@ -195,15 +199,23 @@ class Caser(object):
         feed_dict ={ self.users: user,self.all_items:items,self.sequences:seq,self.is_training:False}
         _, self.prediction = self.sess.run(self.out_all_topk,feed_dict)     
         return self.prediction
-    
+
 
 class Train(Train_basic):
     def __init__(self,args,data):
         super(Train,self).__init__(args,data)
-        self.model = Caser(self.args,self.data ,args.hidden_factor,args.lr, args.lamda, args.optimizer)
+        self.model = Caser(
+            self.args,
+            self.data,
+            args.hidden_factor,
+            args.lr,
+            args.lamda,
+            args.optimizer
+        )
+
     def train(self):  # fit a dataset
         MAP_valid = 0
-        if self.include_valid ==True:
+        if self.include_valid == True:
             train_data = np.array(self.data.train) # Array形式的二元组（user,item），none * 2
             basemodel = 'basemodel_v'
         else:
@@ -213,12 +225,12 @@ class Train(Train_basic):
         for epoch in tqdm(range(0,self.epoch+1)): #每一次迭代训练
             np.random.shuffle(train_data)
 
-            #sample负样本采样
-            NG = 1#NG倍举例
-            NegSample = self.sample_negative(train_data,NG)#采样，none * NG
+            # sample负样本采样
+            NG = 1  # NG 倍举例
+            NegSample = self.sample_negative(train_data, NG)#采样，none * NG
             for user_chunk in toolz.partition_all(self.batch_size,[i for i in range(len(train_data))] ):                
                 chunk = list(user_chunk)
-                neg_chunk = np.array(NegSample[chunk],dtype = np.int)[:,0]#none
+                neg_chunk = np.array(NegSample[chunk],dtype = np.int64)[:,0]#none
                 train_chunk  = train_data[chunk]#  none * 2
                 train_chunk_p5 = np.concatenate([train_chunk,np.array([\
                     self.data.latest_interaction[(line[0],line[1])] for line in train_chunk])],axis =1)#none*2+5

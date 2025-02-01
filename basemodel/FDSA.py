@@ -17,11 +17,16 @@ import scipy.sparse as sp
 from modules import get_token_embeddings, ff, positional_encoding, multihead_attention, label_smoothing, noam_scheme
 from Train_module import Train_basic
 
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+
 
 NUM = 3
-def parse_args(name,factor,seed,batch_size):  
-    parser = argparse.ArgumentParser(description="Run .")  
-    parser.add_argument('--name', nargs='?', default= name )    
+
+
+def parse_args(name,factor,seed,batch_size):
+    parser = argparse.ArgumentParser(description="Run .")
+    parser.add_argument('--name', nargs='?', default= name )
     parser.add_argument('--model', nargs='?', default='FDSA')
     parser.add_argument('--path', nargs='?', default='../datasets/processed/'+name,
                         help='Input data path.')
@@ -66,7 +71,7 @@ class FDSA(object):
         '''
         Init a tensorflow Graph containing: input data, variables, model, loss, optimizer
         '''
-        tf.reset_default_graph()  # 重置默认图       
+        tf.reset_default_graph()  # 重置默认图
         self.graph = tf.Graph()
         with self.graph.as_default():  # , tf.device('/cpu:0'):
             # Set graph level random seed
@@ -85,11 +90,11 @@ class FDSA(object):
             
             self.item_sequence = self.feedback[:,2:] # none * 5
             
-            feature_embs =  tf.reduce_mean(tf.nn.embedding_lookup(self.weights['attribute_embeddings'],self.all_attributes),axis=2)#all*num_attri*k
+            feature_embs = tf.reduce_mean(tf.nn.embedding_lookup(self.weights['attribute_embeddings'],self.all_attributes),axis=2)#all*num_attri*k
           #pair interaction
             self.item_sequence_embs =  tf.nn.embedding_lookup(self.weights['sequence_embeddings'],self.item_sequence)#none *5* d
             self.feature_sequence_embs = tf.nn.embedding_lookup(feature_embs,self.item_sequence)#none *5 * feature * d
-            att_feature   =   tf.nn.softmax(tf.layers.dense(self.feature_sequence_embs,self.hidden_factor),axis=2)
+            att_feature = tf.nn.softmax(tf.layers.dense(self.feature_sequence_embs,self.hidden_factor),axis=2)
             self.feature_sequence_embs = tf.reduce_sum(self.feature_sequence_embs * att_feature,axis=2)#none *5* d
 
             F = self.feature_sequence_embs + self.weights['position']#none *5* d
@@ -109,23 +114,17 @@ class FDSA(object):
             self.out_pos =  tf.reduce_sum( O_sft * self.item_pos,axis=-1,keep_dims=True)#none * 1  
             self.out_neg =  tf.reduce_sum( O_sft * self.item_neg,axis=-1,keep_dims=True)#none * 1  
             
-            
             self.loss_rec = -tf.reduce_sum(tf.log(tf.sigmoid(self.out_pos))+tf.log(tf.sigmoid(1- self.out_neg)))
 
 #            self.loss_rec = self.pairwise_loss(self.out,self.labels)\
 #                            + self.pairwise_loss(self.out,self.labels)
-            
             self.loss_reg = 0
             for wgt in tf.trainable_variables():
                 self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)      
 
-
             self.loss = self.loss_rec+ self.loss_reg 
             self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-        
 
-
-            
             out = tf.matmul(O_sf[:,-1,:],self.weights['item_embeddings'],transpose_b=True)
             self.out_all_topk = tf.nn.top_k(out,200)
             # init
@@ -133,11 +132,11 @@ class FDSA(object):
             init = tf.global_variables_initializer()
             self.sess.run(init)
 
-
     #For model
 
     def jieduan(self,x,name):
         return tf.layers.dense(x,self.hidden_factor,use_bias=False)
+    
     def scaled_dot_product_attention(self, queries, keys, values,name):
         self.num_heads = 4
         batch_size, num_queries, sequence_length = tf.shape(queries)[0], tf.shape(queries)[1], tf.shape(values)[1]
@@ -148,6 +147,7 @@ class FDSA(object):
         S = tf.matmul(tf.nn.softmax(tf.matmul(Q, tf.transpose(K, [0, 1, 3, 2])) / tf.sqrt(float(self.hidden_factor))), V)
         S = tf.reshape(tf.transpose(S, [0, 2, 1, 3]), [batch_size, num_queries, int(self.hidden_factor)])
         return S#tf.keras.layers.LayerNormalization(axis=-1)(S)#tf.stop_gradient(S)* tf.Variable(np.ones([1,1,self.hidden_factor]),dtype=tf.float32)
+
     def SAB(self,sequence_embs,name):
         #sequence_embs #none *5* d
 
@@ -157,6 +157,7 @@ class FDSA(object):
         O_f = tf.layers.dense(tf.layers.dense(M_f,self.hidden_factor),self.hidden_factor,activation=tf.nn.relu)
         O_f = LayerNormalization(O_f+sequence_embs)
         return O_f          
+
     def encode(self, xs, training=True):
         '''
         Returns
@@ -209,7 +210,6 @@ class FDSA(object):
 
         return all_weights
 
-
     def partial_fit(self, data):  # fit a batch
         neg = np.random.randint(0,self.n_item,np.shape(data['feedback'][:,2:]))
         feed_dict = {self.feedback: data['feedback'],self.all_attributes:data['all_attributes'],self.neg_items:neg}
@@ -221,6 +221,7 @@ class FDSA(object):
         feed_dict = {self.feedback: user_item_feedback,self.all_attributes:all_attributes}
         _, self.prediction = self.sess.run(self.out_all_topk,feed_dict)     
         return self.prediction
+
     def pairwise_loss(self,inputx,labels):
 #        input none*1
 #        label none*1
@@ -233,15 +234,15 @@ class Train(Train_basic):
         super(Train,self).__init__(args,data)
         self.item_attributes = self.collect_attributes()
         self.model = FDSA(self.args,self.data ,args.hidden_factor,args.lr, args.lamda, args.optimizer)
-    def sample_negative(self, data,num=10):
+
+    def sample_negative(self, data, num=10):
         samples = np.random.randint( 0,self.n_item,size = (len(data)))
         return samples
 
 
-def FDSA_main(name,factor,seed,batch_size):    
+def FDSA_main(name, factor, seed, batch_size):    
 #name,factor,Topk,seed ,batch_size = 'CiaoDVD',64,10,0,1024
     args = parse_args(name,factor,seed,batch_size)
     data = Data(args,seed)#获取数据
     session_DHRec = Train(args,data)
     session_DHRec.train_attribute()
-    # 

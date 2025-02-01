@@ -15,7 +15,13 @@ import copy
 from tqdm import tqdm 
 import scipy.sparse as sp
 from Train_module import Train_basic
-reuse=tf.AUTO_REUSE
+
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+
+reuse = True
+
+
 def positional_encoding(dim, sentence_length, dtype=tf.float32):
 
     encoded_vec = np.array([pos/np.power(10000, 2*i/dim) for pos in range(sentence_length) for i in range(dim)])
@@ -24,7 +30,7 @@ def positional_encoding(dim, sentence_length, dtype=tf.float32):
 
     return tf.convert_to_tensor(encoded_vec.reshape([sentence_length, dim]), dtype=dtype)
 
-def normalize(inputs, 
+def normalize(inputs,
               epsilon = 1e-8,
               scope="ln",
               reuse=None):
@@ -44,25 +50,27 @@ def normalize(inputs,
     with tf.variable_scope(scope, reuse=reuse):
         inputs_shape = inputs.get_shape()
         params_shape = inputs_shape[-1:]
-    
+
         mean, variance = tf.nn.moments(inputs, [-1], keep_dims=True)
         beta= tf.Variable(tf.zeros(params_shape))
         gamma = tf.Variable(tf.ones(params_shape))
         normalized = (inputs - mean) / ( (variance + epsilon) ** (.5) )
         outputs = gamma * normalized + beta
-        
+
     return outputs
 
-def embedding(inputs, 
-              vocab_size, 
-              num_units, 
-              zero_pad=True, 
-              scale=True,
-              l2_reg=0.0,
-              scope="embedding", 
-              with_t=False,
-              reuse=None):
-    '''
+def embedding(
+    inputs,
+    vocab_size,
+    num_units,
+    zero_pad=True,
+    scale=True,
+    l2_reg=0.0,
+    scope="embedding",
+    with_t=False,
+    reuse=None
+):
+    """
     嵌入一个给定的张量。
 
     Args:
@@ -118,13 +126,15 @@ def embedding(inputs,
       [ 0.50208133  0.53509563]
       [ 1.22204471 -0.96587461]]]    
     ```    
-    '''
+    """
     with tf.variable_scope(scope, reuse=reuse):
-        lookup_table = tf.get_variable('lookup_table',
-                                       dtype=tf.float32,
-                                       shape=[vocab_size, num_units],
-                                       #initializer=tf.contrib.layers.xavier_initializer(),
-                                       regularizer=tf.contrib.layers.l2_regularizer(l2_reg))
+        lookup_table = tf.get_variable(
+            'lookup_table',
+            dtype=tf.float32,
+            shape=[vocab_size, num_units],
+            #initializer=tf.contrib.layers.xavier_initializer(),
+            regularizer=tf.keras.regularizers.l2(l2_reg)
+        )
         if zero_pad:
             lookup_table = tf.concat((tf.zeros(shape=[1, num_units]),
                                       lookup_table[1:, :]), 0)
@@ -299,7 +309,7 @@ def parse_args(name,factor,seed,batch_size):
     parser.add_argument('--num_heads', default=1, type=int)
     parser.add_argument('--epoch', type=int, default=400,
                         help='Number of epochs.')
-        
+
     return parser.parse_args()
 
 class SASREC(object):
@@ -315,16 +325,17 @@ class SASREC(object):
 
         with tf.variable_scope("SASRec", reuse=reuse):
             # sequence embedding, item embedding table
-            self.seq, item_emb_table = embedding(self.input_seq,
-                                                 vocab_size=itemnum + 1,
-                                                 num_units=args.hidden_factor,
-                                                 zero_pad=True,
-                                                 scale=True,
-                                                 l2_reg=args.l2_emb,
-                                                 scope="input_embeddings",
-                                                 with_t=True,
-                                                 reuse=reuse
-                                                 )
+            self.seq, item_emb_table = embedding(
+                self.input_seq,
+                vocab_size=itemnum + 1,
+                num_units=args.hidden_factor,
+                zero_pad=True,
+                scale=True,
+                l2_reg=args.l2_emb,
+                scope="input_embeddings",
+                with_t=True,
+                reuse=reuse
+            )
 
             # Positional Encoding
             t, pos_emb_table = embedding(
@@ -347,7 +358,6 @@ class SASREC(object):
             self.seq *= mask
 
             # Build blocks
-
             for i in range(args.num_blocks):
                 with tf.variable_scope("num_blocks_%d" % i):
 
@@ -437,14 +447,15 @@ class SASREC(object):
 
 
 class Train(Train_basic):
-    def __init__(self,args,data,model):
-        super(Train,self).__init__(args,data)
-        self.model = SASREC(self.n_user,self.n_item,self.args)
+    def __init__(self, args, data, model):
+        super(Train,self).__init__(args, data)
+        self.model = SASREC(self.n_user, self.n_item, self.args)
+
     def train(self):  # fit a dataset
     # Check Init performance
-    #初始结果   
+    #初始结果
         MAP_valid = 0
-        if self.include_valid ==True:
+        if self.include_valid == True:
             PosSample = np.array(self.data.train) # Array形式的二元组（user,item），none * 2
             basemodel = 'basemodel_v'
         else:
@@ -485,15 +496,15 @@ class Train(Train_basic):
                 else:
                     np.save("../datasets/%s/%s/%s.npy"%(basemodel,self.args.name,self.args.model),self.meta_result )
                     break
+
     def sample_negative(self, data,num=10):
         samples = np.random.randint( 0,self.n_item,size = np.shape(data))
         return samples
-    
-    
-def SASRec_main(name,factor,seed,batch_size):       
-#name,factor,Topk,seed ,batch_size = 'Amazon_App',128,10,0,2048
+
+
+def SASRec_main(name, factor, seed, batch_size):
+    # name,factor,Topk,seed ,batch_size = 'Amazon_App',128,10,0,2048
     args = parse_args(name,factor,seed,batch_size)
-    data = Data(args, seed)#获取数据
-    session_DHRec = Train(args,data,SASREC)
+    data = Data(args, seed)  # 获取数据
+    session_DHRec = Train(args, data, SASREC)
     session_DHRec.train()
-    # 

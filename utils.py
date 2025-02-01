@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Fri Jun 18 15:03:33 2021
-
-@author: dyp
-"""
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+
 def positional_encoding(dim, sentence_length, dtype=tf.float32):
 
     encoded_vec = np.array([pos/np.power(10000, 2*i/dim) for pos in range(sentence_length) for i in range(dim)])
@@ -109,20 +108,24 @@ def embedding(inputs,
     ```    
     '''
     with tf.variable_scope(scope, reuse=reuse):
-        lookup_table = tf.get_variable('lookup_table',
-                                       dtype=tf.float32,
-                                       shape=[vocab_size, num_units],
-                                       #initializer=tf.contrib.layers.xavier_initializer(),
-                                       regularizer=tf.contrib.layers.l2_regularizer(l2_reg))
+        lookup_table = tf.get_variable(
+            'lookup_table',
+            dtype=tf.float32,
+            shape=[vocab_size, num_units],
+            #initializer=tf.contrib.layers.xavier_initializer(),
+            regularizer=tf.keras.regularizers.l2(l2_reg)
+        )
         if zero_pad:
             lookup_table = tf.concat((tf.zeros(shape=[1, num_units]),
                                       lookup_table[1:, :]), 0)
         outputs = tf.nn.embedding_lookup(lookup_table, inputs)
-        
+
         if scale:
-            outputs = outputs * (num_units ** 0.5) 
-    if with_t: return outputs,lookup_table
-    else: return outputs
+            outputs = outputs * (num_units ** 0.5)
+    if with_t:
+        return outputs,lookup_table
+    else:
+        return outputs
 
 
 def multihead_attention(queries, 

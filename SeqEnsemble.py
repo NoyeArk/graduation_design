@@ -9,19 +9,21 @@ from tqdm import tqdm
 import scipy.sparse as sp
 from utils import *
 
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 N = 100 #这个N是为了取前多少个items的score，大于N的设为0.
 
 # 基模型
-base_model = ['ACF','FDSA','HARNN','Caser','PFMC','SASRec','ANAM']
+base_model = ['ACF', 'FDSA', 'HARNN', 'Caser', 'PFMC', 'SASRec', 'ANAM']
 
-#'ACF','FDSA','HARNN'都需要attribute信息，Caser','PFMC','SASRec'仅依赖于序列信息。
-print_train = False#是否输出train上的验证结果（过拟合解释）。
+# 'ACF', 'FDSA', 'HARNN' 需要 attribute 信息，Caser', 'PFMC', 'SASRec' 仅依赖于序列信息。
+print_train = False  # 是否输出 train 上的验证结果（过拟合解释）。
 
 
 def parse_args(name,factor,batch_size,tradeoff,user_module,model_module,div_module,epoch,maxlen):
-    parser = argparse.ArgumentParser(description="Run .")  
-    parser.add_argument('--name', nargs='?', default= name )    
+    parser = argparse.ArgumentParser(description="Run .")
+    parser.add_argument('--name', nargs='?', default= name)
     parser.add_argument('--model', nargs='?', default='SASEM')
     parser.add_argument('--path', nargs='?', default='./datasets/processed/'+name,
                         help='Input data path.')
@@ -278,26 +280,44 @@ class Model(object):
 
 
 class MetaData(object):
+    """
+    元数据类
+    """
     def __init__(self, args, data):
         self.args = args
         self.data = data
         self.n_user = self.data.entity_num['user']
         self.n_item = self.data.entity_num['item']
-        self.pair2idx = {(line[0],line[1]):i for i,line in enumerate(data.dict_list['user_item'])}
+        self.pair2idx = {
+            (line[0], line[1]): i
+            for i, line in enumerate(data.dict_list['user_item'])
+        }
+
+        # 加载基础模型预测结果
         self.meta = []
         for method in base_model:
-            load = np.load("./datasets/basemodel/%s/%s.npy"%(self.args.name,method))
+            load = np.load(
+                "./datasets/basemodel/%s/%s.npy" % (self.args.name, method)
+            )
             self.meta.append(load)
-        meta = np.stack(self.meta,axis=1) #this 
-        # meta_XXXX denotes [user,item,ranking(500)]
-        self.train_meta = meta[[self.pair2idx[line[0],line[1]] for line in self.data.valid]]
-        self.test_meta = meta[[self.pair2idx[line[0],line[1]] for line in self.data.test]]
-        # 返回对于ensemble的训练集和basemodel值
-        self.UI_positive,self.label_data = self.label_positive()
+        meta = np.stack(self.meta, axis=1)
+
+        # meta_XXXX表示 [user,item,ranking(500)]
+        self.train_meta = meta[[
+            self.pair2idx[line[0], line[1]]
+            for line in self.data.valid_set
+        ]]
+        self.test_meta = meta[[
+            self.pair2idx[line[0], line[1]]
+            for line in self.data.test_set
+        ]]
+
+        # 返回对于 ensemble 的训练集和 basemodel 值
+        self.UI_positive, self.label_data = self.label_positive()
 
     def all_score(self,traintest):
         #返回所有得分的函数
-        rank_chunk = traintest[:,:,2:2+N] #[batch,k,rank]       
+        rank_chunk = traintest[:,:,2:2+N] #[batch,k,rank]
         btch,k,n = rank_chunk.shape #[batch,k,rank]
         rank_chunk_reshape = np.reshape(rank_chunk,[-1,n])
         u_k_i = np.zeros([btch*k,self.n_item])     #[batch,k,n_item]
@@ -306,16 +326,29 @@ class MetaData(object):
         return np.reshape(u_k_i,[btch,k,self.n_item])     
 
     def label_positive(self):
-        #返回正样本得分的函数        
-        n_k = len(base_model)
-        label = np.zeros([len(self.train_meta),n_k])
-        GT_item = np.expand_dims(self.train_meta[:,0,1],axis=1)#[batch,1] #GT items
-        rank_chunk = copy.deepcopy(self.train_meta[:,:,2:2+N]) #[batch,k,rank]       
-        for k in range(n_k):
-            rank_chunk_k = rank_chunk[:,k,:]    
-            torf = GT_item == rank_chunk_k
-            label[np.sum(torf,axis=1)>0,k] = 1 / (10 + np.argwhere(torf)[:,1])
-        return self.train_meta[:,0,:2],label
+        """
+        返回正样本得分的函数
+        """
+        # 获取基础模型的数量
+        n_base_models = len(base_model)
+        # 创建得分矩阵，形状为 [样本数, 基模型数]
+        label = np.zeros([len(self.train_meta), n_base_models])
+        # 获取真实 (Ground Truth) 物品 ID，扩展维度成 [batch, 1]
+        gt_item = np.expand_dims(self.train_meta[:, 0, 1], axis=1)
+
+        # 复制基模型预测的前 N 个排名结果，形状为 [batch, k, N]，k 是基模型数量，N 是考虑的排名数量
+        rank_chunk = copy.deepcopy(self.train_meta[:, :, 2: 2+N])  # [batch, k, rank]
+
+        for k in range(n_base_models):
+            # 获取当前基模型的排名结果
+            rank_chunk_k = rank_chunk[:, k, :]
+            # 比较真实物品是否在排名中
+            is_item_in_rank = gt_item == rank_chunk_k
+            # 如果物品在排名中，计算得分 = 1/(10 + 物品的排名位置)
+            label[np.sum(is_item_in_rank, axis=1) > 0, k] = 1 / (10 + np.argwhere(is_item_in_rank)[:, 1])
+
+        # 返回用户-物品对和对应的得分
+        return self.train_meta[:, 0, :2], label
 
     def label_negative(self,neglist,NG):#neglist is 1-d list where each element denotes the negative item
         #返回负样本得分的函数        
@@ -332,26 +365,32 @@ class MetaData(object):
                 label_i[np.sum(torf,axis=1)>0,k] = 1 / (10+ np.argwhere(torf)[:,1])
             label.append(label_i)
         return np.stack(label,axis=1)
-        
-            
+
+
 class Train_MF(object):
+    """
+    训练类
+    """
     def __init__(self,args,data,meta_data):
         self.args = args
         self.epoch = self.args.epoch
         self.batch_size = args.batch_size
-        self.n_p = args.maxlen        
-        # Data loadin
+        self.n_p = args.maxlen
+        # Data loading
         self.data = data
         self.meta_data = meta_data
         self.entity = self.data.entity
         self.n_user = self.data.entity_num['user']
         self.n_item = self.data.entity_num['item']
-    # Training\\\建立模型
+        # Training\\\建立模型
         self.model = Model(self.args,self.data ,args.hidden_factor,args.lr, args.lamda, args.optimizer)
-        with open("./process_result.txt","a") as f:
-             f.write("dataset:%s\n"%(args.name))
+        with open("./process_result.txt", "a") as f:
+             f.write("dataset:%s\n" % (args.name))
 
-    def train(self):  # fit a dataset
+    def train(self):
+        """
+        训练函数，拟合数据
+        """
         # 初始结果
         MAP_valid = 0
         p = 0
@@ -366,7 +405,7 @@ class Train_MF(object):
 
             # 正采样
             self.i_pos = ui[:,1]
-            
+
             NG = 1
             self.i_neg = self.sample_negative(ui,self.meta_data.train_meta,NG)#采样，none * NG
             self.seq =np.array([self.data.latest_interaction[(line[0],line[1])] for line in ui])#none*seq        
@@ -389,13 +428,13 @@ class Train_MF(object):
                                   'meta_pos':meta_positive_chunk,'meta_neg':meta_negative_chunck,
                                   'base_focus':base_focus_chunck,'times':times}
                 loss =  self.model.partial_fit(self.feed_dict)
-         # evaluate training and validation datasets
+            # evaluate training and validation datasets
             if epoch % 1 ==0:
                 print("Loss %.4f\t%.4f"%(loss[0],loss[1]))
                 if print_train:
-                    init_test_TopK_train = self.evaluate_TopK(self.data.valid[:10000],self.meta_data.train_score[:10000],self.meta_data.train_meta[:10000],[10]) 
+                    init_test_TopK_train = self.evaluate_TopK(self.data.valid_set[:10000],self.meta_data.train_score[:10000],self.meta_data.train_meta[:10000],[10])
                     print(init_test_TopK_train)
-                init_test_TopK_test = self.evaluate_TopK(self.data.test,0,self.meta_data.test_meta,[20,50]) #0 = self.meta_data.test_score
+                init_test_TopK_test = self.evaluate_TopK(self.data.test_set,0,self.meta_data.test_meta,[20,50]) #0 = self.meta_data.test_score
                 init_test_TopK_valid =0,0,0
                 print("Epoch %d \t TEST SET:%.4f MAP:%.4f,NDCG:%.4f,PREC:%.4f\n"
                   %(epoch,init_test_TopK_valid[2],init_test_TopK_test[3],init_test_TopK_test[4],init_test_TopK_test[5]))
@@ -406,49 +445,62 @@ class Train_MF(object):
                 if MAP_valid < np.mean(init_test_TopK_test[4:]):
                     MAP_valid = np.mean(init_test_TopK_test[4:])
                     result_print = init_test_TopK_test
+
         with open("./result.txt","a") as f:
             f.write("%s,%s,%s,%s,%s,%s,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f\n"%(self.args.name,self.args.model,self.args.user_module,self.args.model_module,self.args.div_module,self.args.tradeoff,result_print[0],result_print[1],result_print[2],result_print[3],result_print[4],result_print[5]))
 
-    def sample_negative(self, u_i,meta_data,NG):  
+    def sample_negative(self, u_i, meta_data, NG):
+        """
+        采样负样本的函数
+        """
         BM_train = self.data.dict_forward['train']
         M = 50
         meta_data = meta_data[:,:,2:2+M]
         meta_data = np.reshape(meta_data,[len(meta_data),-1]) #[none,k*500]
         na,nb = meta_data.shape
         sample = []
-        for i in range(NG):            
+        for i in range(NG):
             sample_i = np.random.randint(0,self.n_item,na)
             for j,item in enumerate(sample_i):
                 if item in BM_train[u_i[j,0]]:
                     sample_i[j] =  np.random.randint(0,self.n_item) 
             sample.append(sample_i)
-        
+
         return np.stack(sample,axis=-1)
 
     def timestamp(self):
-        # infer timestamps
+        """
+        返回时间戳的函数
+        """
+        # 初始化时间戳
         t = np.ones(len(self.u))
-        s,cout,c = self.u[0],10,1
-        for i,ur in enumerate(self.u):
-            if ur==s:
-                cout+=1  
-                c+=1
-                t[i] =cout                                          
+        # 初始化计数器
+        s, cout, c = self.u[0], 10, 1
+        for i, ur in enumerate(self.u):
+            if ur == s:
+                cout += 1
+                c += 1
+                t[i] = cout
             else:
-                t[i-c:i] = t[i-c:i]/cout
-                cout=10
+                t[i - c: i] = t[i - c: i] / cout
+                cout = 10
                 c = 1
                 s = ur
-                t[i] =cout 
-        t[i-c+1:] = t[i-c+1:]/cout
+                t[i] = cout
+        t[i - c + 1:] = t[i - c + 1:] / cout
         return t
 
-    def evaluate_TopK(self,test,test_score,test_meta,topk):
-        u_i = copy.deepcopy(np.array(test))#none * 2
+    def evaluate_TopK(self, test, test_score, test_meta, topk):
+        """
+        评估 TopK 的函数
+        """
+        # 获取测试数据
+        u_i = copy.deepcopy(np.array(test))  # none * 2
         size = len(u_i)
-        result_MAP = {key:[] for key in topk}
-        result_PREC = {key:[] for key in topk}
-        result_NDCG = {key:[] for key in topk}
+        # 初始化结果字典
+        result_MAP = {key: [] for key in topk}
+        result_PREC = {key: [] for key in topk}
+        result_NDCG = {key: [] for key in topk}
         num = 999#self.n_user
         last_iteraction = [] #none*5
         for line in u_i:

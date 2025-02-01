@@ -16,7 +16,8 @@ from tqdm import tqdm
 import scipy.sparse as sp
 from Train_module import Train_basic
 
-
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 NUM = 3
 n = 5
@@ -82,47 +83,40 @@ class ANAM(object):
             self.all_attributes = tf.placeholder(tf.int32, shape=[self.n_item,self.n_attribute,NUM])
             self.attribute_EMB = tf.reduce_mean(tf.reduce_mean(tf.nn.embedding_lookup(self.weights['Q']*self.weights['Q_att'],self.all_attributes),axis=2),axis=1)#[n_item,k]
             self.item_EMB = self.weights['P']*self.weights['P_att']#[n_item,k]
-            
 
             self.users_idx = self.feedback[:,0]#none
             self.items_idx = self.feedback[:,1]#none
             self.users_p5_idx = self.feedback[:,7-n:7] # none * 5
-            
             
             self.attribute_p5 = tf.nn.embedding_lookup(self.attribute_EMB,self.users_p5_idx)# none * 5 *d
             self.item_p5 = tf.nn.embedding_lookup(self.item_EMB,self.users_p5_idx)# none * 5 * d
             
             self.item_attribute =  self.attribute_p5 * self.item_p5 
             
-            lstmCell = tf.contrib.rnn.BasicLSTMCell(self.hidden_factor)
+            lstmCell = tf.keras.layers.LSTMCell(self.hidden_factor)
 #            lstmCell = tf.contrib.rnn.DropoutWrapper(cell=lstmCell, output_keep_prob=0.75)
             self.value, self.preference = tf.nn.dynamic_rnn(lstmCell, self.item_attribute, dtype=tf.float32)
-
                 
             self.user_preference = tf.nn.embedding_lookup(self.weights['U'],self.users_idx) * self.value[:,-1,:]        
             self.item_charactor = tf.nn.embedding_lookup(self.weights['I'],self.items_idx)   
-            #bias 
-            
+
+            # bias 
             self.user_preference_p5 = tf.expand_dims(tf.nn.embedding_lookup(self.weights['U'],self.users_idx),axis=1) * self.value[:,:-1,:]#[none,4,d]       
             self.item_charactor_5 = tf.nn.embedding_lookup(self.weights['I'],self.users_p5_idx)[:,1:,:]##[none,4,d]             
             self.out_p5 = tf.reduce_sum(self.user_preference_p5*self.item_charactor_5,axis=-1)#none*1
 
-
             self.out = tf.reduce_sum(self.user_preference*self.item_charactor,axis=1,keep_dims = True)#none*1
 
-#
 #            self.loss_rec = tf.nn.l2_loss(tf.reduce_sum(self.out,axis=1,keep_dims=True)-self.labels)
 #            self.loss_rec = self.pairwise_loss(self.out,self.labels)\
 #                            + self.pairwise_loss(self.out,self.labels)
             self.loss_rec = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.out, labels=self.labels))\
 #            +tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.out_p5, labels=tf.ones_like(self.out_p5)))\
 #            +tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.out_p5, labels=tf.zeros_like(self.out_p5)))\
-            
           
             self.loss_reg = 0
             for wgt in tf.trainable_variables():
                 self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)      
-
 
             self.loss = self.loss_rec + self.loss_reg 
             # Optimizer.
@@ -130,9 +124,7 @@ class ANAM(object):
         
             self.optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
 
-
             preference = self.user_preference
-            
             
             out = tf.matmul(preference,self.weights['I'],transpose_b = True)#[none ,all]
             self.out_all_topk = tf.nn.top_k(out,1000)
@@ -140,6 +132,7 @@ class ANAM(object):
             self.sess = self._init_session()
             init = tf.global_variables_initializer()
             self.sess.run(init)
+    
     def _init_session(self):
         # adaptively growing video memory
         config = tf.ConfigProto()
@@ -147,7 +140,6 @@ class ANAM(object):
         config.gpu_options.per_process_gpu_memory_fraction = 0.9
         config.allow_soft_placement = True
         return tf.Session(config=config)
-    
   
     def _initialize_weights(self):
         all_weights = dict()
@@ -167,6 +159,7 @@ class ANAM(object):
         feed_dict = {self.feedback: data['feedback'],self.labels:data['labels'],self.all_attributes:data['all_attributes']}
         loss_rec,loss_reg, opt = self.sess.run((self.loss_rec,self.loss_reg, self.optimizer), feed_dict=feed_dict)
         return loss_rec,0,loss_reg
+    
     def pairwise_loss(self,inputx,labels):
 #        input none*1
 #        label none*1
@@ -176,25 +169,35 @@ class ANAM(object):
         hinge_pair = tf.maximum(tf.minimum(inputx-inputx_f,10),-10)
         loss = -tf.reduce_sum(tf.log(tf.sigmoid(hinge_pair*labels)))
         return loss
+    
     def topk(self,user_item_feedback,all_attributes):
-        
         feed_dict = {self.feedback: user_item_feedback,self.all_attributes:all_attributes}
         _, self.prediction = self.sess.run(self.out_all_topk,feed_dict)     
         return self.prediction
+
 
 class Train(Train_basic):
     def __init__(self,args,data):
         super(Train,self).__init__(args,data)
         self.item_attributes = self.collect_attributes()
         self.model = ANAM(self.args,self.data ,args.hidden_factor,args.lr, args.lamda, args.optimizer)
-    def sample_negative(self, data,num=10):
+
+    def sample_negative(self, data, num=10):
         samples = np.random.randint( 0,self.n_item,size = (len(data)))
         return samples
 
-def ANAM_main(name,factor,seed,batch_size):    
-#name,factor,Topk,seed ,batch_size = 'CiaoDVD',64,10,0,2048
-    args = parse_args(name,factor,seed,batch_size)
-    data = Data(args,seed)#获取数据
+def ANAM_main(name, factor, seed, batch_size):
+    """
+    ANAM 主函数
+
+    Args:
+        name (`str`): 数据集名称
+        factor (`int`): 隐因子数量
+        seed (`int`): 随机种子
+        batch_size (`int`): 批量大小
+    """ 
+    # name,factor,Topk,seed ,batch_size = 'CiaoDVD',64,10,0,2048
+    args = parse_args(name, factor, seed, batch_size)
+    data = Data(args, seed)
     session_DHRec = Train(args,data)
     session_DHRec.train_attribute()
-        # 

@@ -16,7 +16,8 @@ from tqdm import tqdm
 import scipy.sparse as sp
 from Train_module import Train_basic
 
-
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 NUM = 3
 def parse_args(name,factor,seed,batch_size):
@@ -67,7 +68,7 @@ class HARNN(object):
         '''
         Init a tensorflow Graph containing: input data, variables, model, loss, optimizer
         '''
-        tf.reset_default_graph()  # 重置默认图       
+        tf.reset_default_graph()  # 重置默认图
         self.graph = tf.Graph()
         with self.graph.as_default():  # , tf.device('/cpu:0'):
             # Set graph level random seed
@@ -78,58 +79,48 @@ class HARNN(object):
             self.labels = tf.placeholder(tf.float32, shape=[None,1])# none 
             self.all_attributes = tf.placeholder(tf.int32, shape=[self.n_item,self.n_attribute,NUM])
             self.item_attribute = tf.reduce_mean(tf.nn.embedding_lookup(self.weights['attribute_embeddings'],self.all_attributes),axis=2)#[n_item,num_attri,k]
-            
+
             self.unified_item  = tf.reduce_sum(tf.concat([self.item_attribute,tf.expand_dims(self.weights['item_embeddings'],axis=1)],axis=1),axis=1)#[n_item,k]
 
             self.users_idx = self.feedback[:,0]#none
             self.items_idx = self.feedback[:,1]#none
             self.item_sequence_idx = self.feedback[:,2:] # none * 5
-            
-            self.target_items = tf.concat([self.feedback[:,3:],tf.expand_dims(self.items_idx,-1)],axis=-1)#none * 5
-           
-            #pair interaction
 
-            
+            self.target_items = tf.concat([self.feedback[:,3:],tf.expand_dims(self.items_idx,-1)],axis=-1)#none * 5
+
+            # pair interaction
+
             self.sequence = tf.nn.embedding_lookup(self.unified_item,self.item_sequence_idx)##none* p5 * d
-            lstmCell = tf.contrib.rnn.BasicLSTMCell(self.hidden_factor)
+            lstmCell = tf.keras.layers.LSTMCell(self.hidden_factor)
             value, self.preference = tf.nn.dynamic_rnn(lstmCell, self.sequence, dtype=tf.float32)#[none,5,d]
             self.preference = value
-                
-             
-                      
-            self.item_pos =  tf.nn.embedding_lookup(self.unified_item,self.target_items)#none *5* d
-            self.item_neg =  tf.nn.embedding_lookup(self.unified_item,self.neg_items)#none *5*d
-            
+  
+            self.item_pos = tf.nn.embedding_lookup(self.unified_item,self.target_items)#none *5* d
+            self.item_neg = tf.nn.embedding_lookup(self.unified_item,self.neg_items)#none *5*d
 
-            self.out_pos =  tf.reduce_sum( self.preference * self.item_pos,axis=-1,keep_dims=True)#none * 1  
-            self.out_neg =  tf.reduce_sum( self.preference * self.item_neg,axis=-1,keep_dims=True)#none * 1  
-            
-            
+            self.out_pos = tf.reduce_sum( self.preference * self.item_pos,axis=-1,keep_dims=True)#none * 1  
+            self.out_neg = tf.reduce_sum( self.preference * self.item_neg,axis=-1,keep_dims=True)#none * 1  
+
             self.loss_rec = -tf.reduce_sum(tf.log(tf.sigmoid(self.out_pos))+tf.log(tf.sigmoid(1- self.out_neg)))
 
-            
             self.loss_reg = 0
             for wgt in tf.trainable_variables():
                 self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)      
 
-                
-
             self.loss = self.loss_rec + self.loss_reg 
             if self.optimizer_type == 'AdamOptimizer':
                 self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-            
+
 #                self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
 #                grads = self.optimizer.compute_gradients(self.loss)
 #                for i, (g, v) in enumerate(grads):
 #                    if g is not None:
 #                        grads[i] = (tf.clip_by_norm(g, 10), v)  # clip gradients
 #                self.train_op = self.optimizer.apply_gradients(grads)    
-#                                
-#                
                 
             elif self.optimizer_type == 'AdagradOptimizer':
                 self.optimizer = tf.train.AdagradOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-            
+
             user_embs = self.preference[:,-1,:]#none*k            
             out = tf.matmul(user_embs, self.unified_item,transpose_b=True)
             self.out_all_topk = tf.nn.top_k(out,200)
