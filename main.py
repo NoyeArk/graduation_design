@@ -27,7 +27,7 @@ tradeoff = {
 # 不同数据集的训练轮数设置
 epoch = {
     'Amazon_App': 15,
-    'Kindle': 5,
+    'Kindle': 20,
     'Clothing': 10, 
     'Grocery': 20,
     'Instant_Video': 20,
@@ -53,7 +53,7 @@ maxlen = {
 # w/o TPDiv: tradeoff[data], 'SAtt', 'dynamic', 'AEM-cov'
 
 # 运行示例
-data = 'Amazon_App'
+data = 'Kindle'
 
 SEM_main(
     name=data,

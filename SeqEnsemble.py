@@ -49,6 +49,9 @@ def parse_args(name,factor,batch_size,tradeoff,user_module,model_module,div_modu
 
 
 class Model(object):
+    """
+    模型类
+    """
     def __init__(self, args, data, hidden_factor, learning_rate, lamda_bilinear, optimizer_type):
         """
         初始化模型
@@ -79,40 +82,50 @@ class Model(object):
         """
         初始化tensorflow图
         """
-        tf.reset_default_graph()  # 重置默认图       
+        tf.reset_default_graph()  # 重置默认图
         self.graph = tf.Graph()
 
         with self.graph.as_default():  # , tf.device('/cpu:0'):
             # 设置图级别随机种子
             # 输入数据
             self.weights = self._initialize_weights()
+
+            # 用于存放用户 ID
             self.u = tf.placeholder(tf.int32, shape=[None])
-            self.i_pos = tf.placeholder(tf.int32, shape=[None])  
-            self.i_neg = tf.placeholder(tf.int32, shape=[None,None])  
-            self.input_seq = tf.placeholder(tf.int32, shape=[None,self.n_p])  
-            self.meta_pos = tf.placeholder(tf.float32, shape=[None,self.n_k])
-            self.meta_neg = tf.placeholder(tf.float32, shape=[None,None,self.n_k])
-            self.base_focus = tf.placeholder(tf.int32, shape=[None,self.n_k,self.n_p])
+            # 用于存放正样本 ID
+            self.i_pos = tf.placeholder(tf.int32, shape=[None])
+            # 用于存放负样本 ID
+            self.i_neg = tf.placeholder(tf.int32, shape=[None,None])
+            # 用于存放输入序列
+            self.input_seq = tf.placeholder(tf.int32, shape=[None, self.n_p])
+            # 用于存放正样本得分
+            self.meta_pos = tf.placeholder(tf.float32, shape=[None, self.n_k])
+            # 用于存放负样本得分
+            self.meta_neg = tf.placeholder(tf.float32, shape=[None, None, self.n_k])
+            # 用于存放基模型表示
+            self.base_focus = tf.placeholder(tf.int32, shape=[None, self.n_k, self.n_p])
+            # 用于存放时间戳
             self.times = tf.placeholder(tf.float32, shape=[None])
-            self.is_training = tf.placeholder(tf.bool, shape=())            
+            # 用于存放是否训练
+            self.is_training = tf.placeholder(tf.bool, shape=())
 
             # 用户嵌入
             self.user_embed = tf.nn.embedding_lookup(self.weights['user_embeddings'], self.u) #[none,d]
             # 条件
-            self.condition = tf.to_float(tf.greater(tf.reduce_sum(self.meta_pos,axis=1), 0))
-            # 这是基模型的表示（k），它们包含前p个项目（p）的表示
+            self.condition = tf.to_float(tf.greater(tf.reduce_sum(self.meta_pos, axis=1), 0))
 
-            if self.args.user_module =='MC':
-                self.item_sequence_embs = tf.nn.embedding_lookup(self.weights['item_embeddings1'],self.input_seq)#[none,p,d]      
-                self.preference =   self.user_embed + tf.reduce_sum(self.item_sequence_embs,axis=1)
+            # 这是基模型的表示（k），它们包含前p个项目（p）的表示
+            if self.args.user_module == 'MC':
+                self.item_sequence_embs = tf.nn.embedding_lookup(self.weights['item_embeddings1'], self.input_seq)#[none,p,d]      
+                self.preference = self.user_embed + tf.reduce_sum(self.item_sequence_embs,axis=1)
                 self.items_embs = self.weights['item_embeddings1']
-            if self.args.user_module =='GRU':
-                self.item_sequence_embs = tf.nn.embedding_lookup(self.weights['item_embeddings1'],self.input_seq)#[none,p,d]      
+            if self.args.user_module == 'GRU':
+                self.item_sequence_embs = tf.nn.embedding_lookup(self.weights['item_embeddings1'], self.input_seq)#[none,p,d]      
                 lstmCell = tf.contrib.rnn.GRUCell(self.hidden_factor)
                 value, preference = tf.nn.dynamic_rnn(lstmCell, self.item_sequence_embs, dtype=tf.float32)#[none,5,d]
                 self.preference = value[:,-1,:] + self.user_embed #[none,d]
                 self.items_embs = self.weights['item_embeddings1']
-            if self.args.user_module =='LSTM':  
+            if self.args.user_module == 'LSTM':
                 self.item_sequence_embs = tf.nn.embedding_lookup(self.weights['item_embeddings1'],self.input_seq)#[none,p,d]      
                 lstmCell = tf.contrib.rnn.LSTMCell(self.hidden_factor)
                 value, preference = tf.nn.dynamic_rnn(lstmCell, self.item_sequence_embs, dtype=tf.float32)#[none,5,d]
@@ -123,66 +136,108 @@ class Model(object):
                 self.preference =self.state[:,-1,:]  +  self.user_embed #[none,d]
                 self.items_embs = self.item_emb_table
             if self.args.user_module =='static':
-                self.preference =   self.user_embed 
+                self.preference =   self.user_embed
                 self.items_embs = self.weights['item_embeddings1']
-                
-            if self.args.model_module=='dynamic':
-                self.each_model_emb = tf.nn.embedding_lookup(self.items_embs,self.base_focus)#[none,k,p,d]   
-                self.wgt_model = tf.reshape(tf.constant(1/np.log2(np.arange(self.n_p)+2),dtype=tf.float32),[1,1,-1,1])
-                self.basemodel_emb = self.weights['base_embeddings'] + tf.reduce_sum(self.wgt_model * self.each_model_emb,axis=2)##[none,k,d]self.weights['base_embeddings']
-            if self.args.model_module=='static':       
-                self.basemodel_emb = self.weights['base_embeddings']#[1,k,d]
-            #wgts learning
-            self.wgts_org = tf.reduce_sum(tf.expand_dims(self.preference,axis=1)*self.basemodel_emb,axis=-1) #[none,n_k]
-            self.wgts = tf.nn.softmax(self.wgts_org,axis=-1)#[none,n_k]            
-            self.score_positive = tf.reduce_sum(self.meta_pos * self.wgts,axis=1)#none
-            self.score_negative = tf.reduce_sum(self.meta_neg * tf.expand_dims(self.wgts,axis=1),axis=-1)#none * NG
-            self.loss_rec = self.pairwise_loss(self.score_positive,self.score_negative)
 
+            # 动态模型
+            if self.args.model_module == 'dynamic':
+                # 查找每个基模型的嵌入
+                self.each_model_emb = tf.nn.embedding_lookup(self.items_embs, self.base_focus)  # [none,k,p,d]
+                # 计算每个时间步的权重
+                self.wgt_model = tf.reshape(tf.constant(1/np.log2(np.arange(self.n_p)+2),dtype=tf.float32),[1,1,-1,1])
+                # 计算每个基模型的嵌入
+                self.basemodel_emb = self.weights['base_embeddings'] + tf.reduce_sum(self.wgt_model * self.each_model_emb,axis=2)##[none,k,d]self.weights['base_embeddings']
+            if self.args.model_module=='static':
+                self.basemodel_emb = self.weights['base_embeddings']#[1,k,d]
+
+            # 计算每个基模型的权重
+            self.wgts_org = tf.reduce_sum(tf.expand_dims(self.preference,axis=1) * self.basemodel_emb, axis=-1) # [none,n_k]
+
+            # 使用 softmax 函数计算权重
+            self.wgts = tf.nn.softmax(self.wgts_org, axis=-1)  #[none, n_k]
+
+            # 计算正样本得分
+            self.score_positive = tf.reduce_sum(self.meta_pos * self.wgts,axis=1)#none
+
+            # 计算负样本得分
+            self.score_negative = tf.reduce_sum(self.meta_neg * tf.expand_dims(self.wgts,axis=1), axis=-1)#none * NG
+
+            # 计算正负样本损失
+            self.loss_rec = self.pairwise_loss(self.score_positive, self.score_negative)
+
+            # 计算正则化损失
             self.loss_reg = 0
             for wgt in tf.trainable_variables():
-                self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)      
-            
+                self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)
+
+            # 计算多样性损失
             if self.args.div_module == 'AEM-cov':
-                #AEM diversity
+                # AEM diversity
                 self.model_emb =  self.basemodel_emb#[none,k,p]
                 cov_idx = tf.constant(1-np.expand_dims(np.diag(np.ones(self.n_k)),axis=0),dtype=tf.float32)#[none,k,k]    
-                cov_div1 =  tf.square(tf.reduce_sum(tf.expand_dims(self.model_emb,axis=1)*tf.expand_dims(self.model_emb,axis=2),axis=-1))
+                cov_div1 = tf.square(tf.reduce_sum(tf.expand_dims(self.model_emb,axis=1)*tf.expand_dims(self.model_emb,axis=2),axis=-1))
                 l2 = tf.reduce_sum(self.model_emb **2,axis=-1)#none* k 
                 cov_div2 = tf.matmul(tf.expand_dims(l2,axis=-1),tf.expand_dims(l2,axis=1))#none* k *k
-                
-                self.cov =cov_div1/ cov_div2#[none,k,k]           
+                self.cov = cov_div1 / cov_div2  #[none, k, k]
+
             if self.args.div_module == 'cov':
                 self.model_emb =  self.basemodel_emb#[none,k,p]
-                cov_wgt =  tf.stop_gradient(tf.expand_dims(self.wgts,axis=1) + tf.expand_dims(self.wgts,axis=2)) #[none,k,k]
+                cov_wgt = tf.stop_gradient(tf.expand_dims(self.wgts,axis=1) + tf.expand_dims(self.wgts,axis=2)) #[none,k,k]
                 cov_idx = tf.constant(1-np.expand_dims(np.diag(np.ones(self.n_k)),axis=0),dtype=tf.float32)#[none,k,k]    
-                cov_div =  tf.square(tf.reduce_sum(tf.expand_dims(self.model_emb,axis=1)*tf.expand_dims(self.model_emb,axis=2),axis=-1))
+                cov_div = tf.square(tf.reduce_sum(tf.expand_dims(self.model_emb,axis=1)*tf.expand_dims(self.model_emb,axis=2),axis=-1))
                 coff = cov_wgt * tf.reshape(self.times,[-1,1,1])
-                self.cov =  cov_idx * (1 - cov_div)#[none,k,k]           
-                self.cov =  self.cov * coff               
-                
-            self.loss_diversity = - self.args.tradeoff *  tf.reduce_sum(self.cov)
-            
-            self.loss = self.loss_rec + self.loss_reg + self.loss_diversity
-            if self.optimizer_type == 'AdamOptimizer':
-                self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-            elif self.optimizer_type == 'AdagradOptimizer':
-                self.optimizer = tf.train.AdagradOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-            elif self.optimizer_type == 'SGD':
-                self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-            self.meta_all_items = tf.placeholder(tf.float32, shape=[None,self.n_k,self.n_item])            
-            out = tf.reduce_sum(tf.expand_dims(self.wgts,axis=2) * self.meta_all_items,axis=1)#[none, n_item]
-            self.out_all_topk = tf.nn.top_k(out,200)
+                self.cov = cov_idx * (1 - cov_div)  # [none, k, k]
+                self.cov = self.cov * coff
 
-            # init
+            # 计算多样性损失
+            self.loss_diversity = - self.args.tradeoff * tf.reduce_sum(self.cov)
+
+            # 计算总损失
+            self.loss = self.loss_rec + self.loss_reg + self.loss_diversity
+
+            # 选择优化器
+            if self.optimizer_type == 'AdamOptimizer':
+                self.optimizer = tf.train.AdamOptimizer(
+                    learning_rate=self.learning_rate
+                ).minimize(self.loss)
+            elif self.optimizer_type == 'AdagradOptimizer':
+                self.optimizer = tf.train.AdagradOptimizer(
+                    learning_rate=self.learning_rate
+                ).minimize(self.loss)
+            elif self.optimizer_type == 'SGD':
+                self.optimizer = tf.train.GradientDescentOptimizer(
+                    learning_rate=self.learning_rate
+                ).minimize(self.loss)
+
+            # 计算所有物品的得分
+            self.meta_all_items = tf.placeholder(tf.float32, shape=[None, self.n_k, self.n_item])
+            out = tf.reduce_sum(
+                tf.expand_dims(self.wgts, axis=2) * self.meta_all_items,
+                axis=1
+            )  #[none, n_item]
+            self.out_all_topk = tf.nn.top_k(out, 200)
+
+            # 初始化会话
             self.sess = self._init_session()
+
+            # 初始化所有变量
             init = tf.global_variables_initializer()
             self.sess.run(init)
 
     def FFN(self,input_seq):
+        """
+        计算前馈神经网络的输出。
+
+        Args:
+            input_seq (`tf.Tensor`): 输入序列
+
+        Returns:
+            seq_emb (`tf.Tensor`): 前馈神经网络的输出
+        """
         mask = tf.expand_dims(tf.to_float(tf.not_equal(input_seq, -1)), -1)
         reuse = tf.AUTO_REUSE
         with tf.variable_scope("SASRec", reuse=reuse):
+
             # sequence embedding, item embedding table
             self.seq, item_emb_table = embedding(
                 input_seq,
@@ -263,20 +318,68 @@ class Model(object):
 
         return all_weights
 
-    def partial_fit(self, data):  # fit a batch
-        feed_dict = {self.u:data['u'],self.input_seq:data['seq'],self.i_pos:data['i_pos'],self.i_neg:data['i_neg'],self.times:data['times'],
-                     self.meta_pos:data['meta_pos'],self.meta_neg:data['meta_neg'],self.base_focus:data['base_focus'],self.is_training:True}
-        loss_rec,loss_diversity, opt = self.sess.run((self.loss_rec,self.loss_diversity, self.optimizer), feed_dict=feed_dict)
-        return loss_rec,loss_diversity
+    def partial_fit(self, data):
+        """
+        拟合一个批次。
+
+        Args:
+            data (dict): 数据字典
+
+        Returns:
+            loss_rec (`tf.Tensor`): 正样本损失
+            loss_diversity (`tf.Tensor`): 多样性损失
+        """
+        feed_dict = {
+            self.u: data['u'],
+            self.input_seq: data['seq'],
+            self.i_pos: data['i_pos'],
+            self.i_neg: data['i_neg'],
+            self.times: data['times'],
+            self.meta_pos: data['meta_pos'],
+            self.meta_neg: data['meta_neg'],
+            self.base_focus: data['base_focus'],
+            self.is_training: True
+        }
+
+        loss_rec, loss_diversity, opt = self.sess.run(
+            (self.loss_rec, self.loss_diversity, self.optimizer),
+            feed_dict=feed_dict
+        )
+        return loss_rec, loss_diversity
 
     def pairwise_loss(self,postive,negatvie):
-        return -tf.reduce_sum(tf.sigmoid((postive-negatvie)))
-    
-    def topk(self,user,seq,items_score,base_focus):
-        feed_dict = {self.u:user[:,0],self.input_seq:seq,self.meta_all_items:items_score,self.base_focus:base_focus,self.is_training:False}
-        _, self.prediction = self.sess.run(self.out_all_topk,feed_dict)     
-        wgts = self.sess.run(self.wgts,feed_dict)     
-        return self.prediction,wgts
+        """
+        计算正负样本损失。
+
+        Args:
+            postive (`tf.Tensor`): 正样本得分
+            negatvie (`tf.Tensor`): 负样本得分
+
+        Returns:
+            loss (`tf.Tensor`): 正负样本损失
+        """
+        return -tf.reduce_sum(tf.sigmoid((postive - negatvie)))
+
+    def topk(self, user, seq, items_score, base_focus):
+        """
+        计算 topk 得分。
+
+        Args:
+            user (`tf.Tensor`): 用户 ID
+            seq (`tf.Tensor`): 输入序列
+            items_score (`tf.Tensor`): 物品得分
+            base_focus (`tf.Tensor`): 基模型表示
+        """
+        feed_dict = {
+            self.u: user[:, 0],
+            self.input_seq: seq,
+            self.meta_all_items: items_score,
+            self.base_focus: base_focus,
+            self.is_training: False
+        }
+        _, self.prediction = self.sess.run(self.out_all_topk, feed_dict)
+        wgts = self.sess.run(self.wgts, feed_dict)
+        return self.prediction, wgts
 
 
 class MetaData(object):
@@ -302,7 +405,7 @@ class MetaData(object):
             self.meta.append(load)
         meta = np.stack(self.meta, axis=1)
 
-        # meta_XXXX表示 [user,item,ranking(500)]
+        # meta_XXXX 表示 [user, item, ranking(500)]
         self.train_meta = meta[[
             self.pair2idx[line[0], line[1]]
             for line in self.data.valid_set
@@ -315,11 +418,20 @@ class MetaData(object):
         # 返回对于 ensemble 的训练集和 basemodel 值
         self.UI_positive, self.label_data = self.label_positive()
 
-    def all_score(self,traintest):
-        #返回所有得分的函数
+    def all_score(self, traintest):
+        """
+        返回所有得分的函数
+
+        Args:
+            traintest (`np.ndarray`): 训练集或测试集
+
+        Returns:
+            u_k_i (`np.ndarray`): 所有得分
+        """
         rank_chunk = traintest[:,:,2:2+N] #[batch,k,rank]
         btch,k,n = rank_chunk.shape #[batch,k,rank]
         rank_chunk_reshape = np.reshape(rank_chunk,[-1,n])
+
         u_k_i = np.zeros([btch*k,self.n_item])     #[batch,k,n_item]
         for i in range(n):
             u_k_i[np.arange(len(u_k_i)),rank_chunk_reshape[:,i]] = 1/(i+10) 
@@ -383,7 +495,14 @@ class Train_MF(object):
         self.n_user = self.data.entity_num['user']
         self.n_item = self.data.entity_num['item']
         # Training\\\建立模型
-        self.model = Model(self.args,self.data ,args.hidden_factor,args.lr, args.lamda, args.optimizer)
+        self.model = Model(
+            self.args,
+            self.data,
+            args.hidden_factor,
+            args.lr,
+            args.lamda,
+            args.optimizer
+        )
         with open("./process_result.txt", "a") as f:
              f.write("dataset:%s\n" % (args.name))
 
@@ -411,9 +530,9 @@ class Train_MF(object):
             self.seq =np.array([self.data.latest_interaction[(line[0],line[1])] for line in ui])#none*seq        
             meta_positive = self.meta_data.label_data #none * k  k denotes BM number
             meta_negative = self.meta_data.label_negative(self.i_neg,NG)#none * NG * k
-            base_focus = self.meta_data.train_meta[:,:,2:2+self.n_p] #none * k * p # p denotes window size
-            
-            for user_chunk in tqdm(toolz.partition_all(self.batch_size,[i for i in range(len(ui))] )):                
+            base_focus = self.meta_data.train_meta[:, :, 2: 2 + self.n_p] #none * k * p # p denotes window size
+
+            for user_chunk in tqdm(toolz.partition_all(self.batch_size, [i for i in range(len(ui))])):
                 p = p + 1
                 chunk = shuffle[list(user_chunk)]
                 u_chunk = self.u[chunk] #none 
@@ -428,18 +547,20 @@ class Train_MF(object):
                                   'meta_pos':meta_positive_chunk,'meta_neg':meta_negative_chunck,
                                   'base_focus':base_focus_chunck,'times':times}
                 loss =  self.model.partial_fit(self.feed_dict)
-            # evaluate training and validation datasets
+
+            # 评估训练和验证数据集
             if epoch % 1 ==0:
-                print("Loss %.4f\t%.4f"%(loss[0],loss[1]))
+                print("Loss %.4f\t%.4f"%(loss[0], loss[1]))
+
                 if print_train:
                     init_test_TopK_train = self.evaluate_TopK(self.data.valid_set[:10000],self.meta_data.train_score[:10000],self.meta_data.train_meta[:10000],[10])
                     print(init_test_TopK_train)
                 init_test_TopK_test = self.evaluate_TopK(self.data.test_set,0,self.meta_data.test_meta,[20,50]) #0 = self.meta_data.test_score
                 init_test_TopK_valid =0,0,0
-                print("Epoch %d \t TEST SET:%.4f MAP:%.4f,NDCG:%.4f,PREC:%.4f\n"
+                print("Epoch %d \t TEST SET:%.4f MAP:%.4f, NDCG:%.4f, PREC:%.4f\n"
                   %(epoch,init_test_TopK_valid[2],init_test_TopK_test[3],init_test_TopK_test[4],init_test_TopK_test[5]))
                 with open("./process_result.txt","a") as f:
-                     f.write("Epoch %d \t TEST SET:%.4f MAP:%.4f,NDCG:%.4f,PREC:%.4f\n"
+                     f.write("Epoch %d \t TEST SET:%.4f MAP:%.4f, NDCG:%.4f, PREC:%.4f\n"
                       %(epoch,init_test_TopK_valid[2],init_test_TopK_test[3],init_test_TopK_test[4],init_test_TopK_test[5]))
 
                 if MAP_valid < np.mean(init_test_TopK_test[4:]):
