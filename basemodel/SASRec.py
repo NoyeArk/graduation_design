@@ -478,7 +478,7 @@ class Train(Train_basic):
                 pos = sample_chunk[:,1:6] 
                 pos[pos==-1]=0
                 neg = self.sample_negative(pos) 
-    
+
                 # meta-path feature
                 self.feed_dict = {'u':u,'seq':seq,'pos':pos,'neg':neg}
                 loss =  self.model.partial_fit(self.feed_dict)
