@@ -432,12 +432,12 @@ class SASREC(object):
         return  self.prediction 
 
     def partial_fit(self, data):  # fit a batch
-        
 #        feed_dict = {self.feedback: data['feedback'],self.labels:data['labels'],self.attributes:data['attributes']}
         auc, loss, _ = self.sess.run([self.auc, self.loss, self.train_op],
                                     {self.u: data['u'], self.input_seq: data['seq'], self.pos: data['pos'], self.neg: data['neg'],
                                      self.is_training: True})
         return auc,loss
+
     def _init_session(self):
         # adaptively growing video memory
         config = tf.ConfigProto()

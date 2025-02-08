@@ -21,11 +21,11 @@ def relation_dict(n1, n2, list1):
         list1 (`list`): 用户-物品对
 
     Returns:
-        dict: 关系字典
+        `dict`: 包含实体 1 到实体 2 的映射关系的字典。
     """
     # 将总数 n1，n2 的 entity 转化成映射字典
-    dict_forward = {i:[] for i in range(n1)}
-    dict_reverse = {i:[] for i in range(n2)}
+    dict_forward = {i: [] for i in range(n1)}
+    dict_reverse = {i: [] for i in range(n2)}
     for x, y in list1:
         if y not in dict_forward[x]:
             dict_forward[int(x)].append(int(y))
@@ -201,8 +201,6 @@ class Data(object):
             self.entity_num['item'],
             self.test_set
         )
-        # self.dict_forward['valid']= relation_dict(self.entity_num['user'],self.entity_num['item'],self.valid)
-
         self.markov = self.constrcut_markov_matrices()
 
         # 将物品-其他实体对转化为关系字典
