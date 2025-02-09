@@ -13,7 +13,7 @@ def positional_encoding(dim, sentence_length, dtype=tf.float32):
 
     return tf.convert_to_tensor(encoded_vec.reshape([sentence_length, dim]), dtype=dtype)
 
-def normalize(inputs, 
+def normalize(inputs,
               epsilon = 1e-8,
               scope="ln",
               reuse=None):
@@ -33,13 +33,13 @@ def normalize(inputs,
     with tf.variable_scope(scope, reuse=reuse):
         inputs_shape = inputs.get_shape()
         params_shape = inputs_shape[-1:]
-    
+
         mean, variance = tf.nn.moments(inputs, [-1], keep_dims=True)
         beta= tf.Variable(tf.zeros(params_shape))
         gamma = tf.Variable(tf.ones(params_shape))
         normalized = (inputs - mean) / ( (variance + epsilon) ** (.5) )
         outputs = gamma * normalized + beta
-        
+
     return outputs
 
 def embedding(inputs, 

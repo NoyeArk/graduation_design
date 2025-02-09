@@ -296,26 +296,26 @@ class Data(object):
 
         return train_set, valid_set, test_set
 
-    def find_latest_interaction(self, user_item, keep=last):
+    def find_latest_interaction(self, user_item_pairs, keep=last):
         """
         获取每个用户最近的交互记录
 
         Args:
-            u_i (`list`): 用户-物品对
+            user_item_pairs (`list`): 用户-物品对
             keep (`int`): 保留的交互次数
 
         Returns:
-            dict: 用户-物品对
+            dict: { (user, item): [最近的交互记录] }
         """
         result = dict()
         init = [-1 for i in range(keep)]
         latest = copy.deepcopy(init)
 
         # 遍历用户-物品对
-        for i, (user, item) in enumerate(user_item):
+        for i, (user, item) in enumerate(user_item_pairs):
             result[(user, item)] = copy.deepcopy(list(latest[-keep:]))
-            if i < len(user_item) - 1:
-                if user_item[i+1][0] != user:
+            if i < len(user_item_pairs) - 1:
+                if user_item_pairs[i + 1][0] != user:
                     latest = copy.deepcopy(init)
                 else:
                     latest.append(item)

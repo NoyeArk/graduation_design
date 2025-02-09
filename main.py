@@ -1,8 +1,8 @@
 from SeqEnsemble import SEM_main
 
 # 模型参数设置
-factor = 32
 seed = 0
+factor = 128
 
 # 不同数据集的批次大小设置
 batch_size = {
@@ -53,14 +53,14 @@ maxlen = {
 # w/o TPDiv: tradeoff[data], 'SAtt', 'dynamic', 'AEM-cov'
 
 # 运行示例
-data = 'Amazon_App'
+data = 'Games'
 
 SEM_main(
     name=data,
     factor=factor,
     batch_size=batch_size[data],
     tradeoff=tradeoff[data],
-    user_module='SAtt',
+    user_module='DIEN',
     model_module='dynamic',
     div_module='cov',
     epoch=epoch[data],
