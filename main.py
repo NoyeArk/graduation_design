@@ -53,7 +53,7 @@ maxlen = {
 # w/o TPDiv: tradeoff[data], 'SAtt', 'dynamic', 'AEM-cov'
 
 # 运行示例
-data = 'Games'
+data = 'Amazon_App'
 
 SEM_main(
     name=data,

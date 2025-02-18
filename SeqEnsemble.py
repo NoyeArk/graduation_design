@@ -12,7 +12,7 @@ from GCNdata import Data
 N = 100  # 这个N是为了取前多少个items的score，大于N的设为0.
 
 # 基模型
-base_model = ['ACF', 'FDSA', 'HARNN', 'Caser', 'PFMC', 'SASRec', 'ANAM']
+base_models = ['ACF', 'FDSA', 'HARNN', 'Caser', 'PFMC', 'SASRec', 'ANAM']
 
 # 'ACF', 'FDSA', 'HARNN' 需要 attribute 信息，Caser', 'PFMC', 'SASRec' 仅依赖于序列信息。
 print_train = False  # 是否输出 train 上的验证结果（过拟合解释）。
@@ -69,7 +69,7 @@ class Model(object):
         self.hidden_factor = hidden_factor
         self.lamda_bilinear = lamda_bilinear
         self.optimizer_type = optimizer_type
-        self.n_base_model = len(base_model)
+        self.n_base_model = len(base_models)
         self.seq_max_len = self.args.maxlen
 
         # 初始化 prediction 属性
@@ -215,7 +215,9 @@ class Model(object):
                 self.cov = cov_div1 / cov_div2  #[none, k, k]
             elif self.args.div_module == 'cov':
                 self.model_emb =  self.basemodel_emb#[none,k,p]
-                cov_wgt = tf.stop_gradient(tf.expand_dims(self.wgts,axis=1) + tf.expand_dims(self.wgts,axis=2)) #[none,k,k]
+                cov_wgt = tf.stop_gradient(
+                    tf.expand_dims(self.wgts, axis=1) + tf.expand_dims(self.wgts ,axis=2)
+                )  # [none, k, k]
                 cov_idx = tf.constant(1-np.expand_dims(np.diag(np.ones(self.n_base_model)),axis=0),dtype=tf.float32)#[none,k,k]    
                 cov_div = tf.square(tf.reduce_sum(tf.expand_dims(self.model_emb,axis=1)*tf.expand_dims(self.model_emb,axis=2),axis=-1))
                 coff = cov_wgt * tf.reshape(self.times,[-1,1,1])
@@ -246,6 +248,9 @@ class Model(object):
                 axis=1
             )  #[none, n_item]
             self.out_all_topk = tf.nn.top_k(out, 200)
+
+            # 初始化 saver
+            self.saver = tf.train.Saver(max_to_keep=1)
 
             # 初始化会话
             self.sess = self._init_session()
@@ -536,24 +541,24 @@ class Model(object):
             self.is_training: True
         }
 
-        loss_rec, loss_diversity, opt = self.sess.run(
+        loss_rec, loss_diversity, _ = self.sess.run(
             (self.loss_rec, self.loss_diversity, self.optimizer),
             feed_dict=feed_dict
         )
         return loss_rec, loss_diversity
 
-    def pairwise_loss(self, postive, negatvie):
+    def pairwise_loss(self, postive, negative):
         """
         计算正负样本损失。
 
         Args:
             postive (`tf.Tensor`): 正样本得分
-            negatvie (`tf.Tensor`): 负样本得分
+            negative (`tf.Tensor`): 负样本得分
 
         Returns:
             loss (`tf.Tensor`): 正负样本损失
         """
-        return -tf.reduce_sum(tf.sigmoid((postive - negatvie)))
+        return -tf.reduce_sum(tf.sigmoid((postive - negative)))
 
     def topk(self, user_item_pairs, last_interaction, items_score, base_focus):
         """
@@ -581,6 +586,26 @@ class Model(object):
         wgts = self.sess.run(self.wgts, feed_dict)
         return pred_item, wgts
 
+    def save_model(self, save_path):
+        """
+        保存模型到指定路径
+        
+        Args:
+            save_path (str): 保存模型的路径
+        """
+        self.saver.save(self.sess, save_path)
+        print(f"Model saved to: {save_path}")
+
+    def load_model(self, load_path):
+        """
+        从指定路径加载模型
+        
+        Args:
+            load_path (str): 加载模型的路径
+        """
+        self.saver.restore(self.sess, load_path)
+        print(f"Model loaded from: {load_path}")
+
 
 class MetaData(object):
     """
@@ -593,32 +618,30 @@ class MetaData(object):
         self.n_item = self.data.entity_num['item']
 
         # (user, item) -> index
-        self.pair2idx = {
+        self.user_item_pairs_to_index = {
             (line[0], line[1]): i
             for i, line in enumerate(data.dict_list['user_item'])
         }
 
         # 加载基础模型预测结果
         self.meta = []
-        for method in base_model:
-            load = np.load(
-                "./datasets/basemodel/%s/%s.npy" % (self.args.name, method)
-            )
+        for base_model in base_models:
+            load = np.load(f"./datasets/basemodel/{self.args.name}/{base_model}.npy")
             self.meta.append(load)
         meta = np.stack(self.meta, axis=1)
 
         # meta_XXXX 表示 [user, item, ranking(500)]
         self.train_meta = meta[[
-            self.pair2idx[line[0], line[1]]
+            self.user_item_pairs_to_index[line[0], line[1]]
             for line in self.data.valid_set
         ]]
         self.test_meta = meta[[
-            self.pair2idx[line[0], line[1]]
+            self.user_item_pairs_to_index[line[0], line[1]]
             for line in self.data.test_set
         ]]
 
         # 返回对于 ensemble 的训练集和 basemodel 值
-        self.UI_positive, self.label_data = self.label_positive()
+        self.user_item_pairs, self.user_item_pairs_labels = self.label_positive()
 
         # 初始化 users 属性
         self.users = None
@@ -639,8 +662,8 @@ class MetaData(object):
 
         u_k_i = np.zeros([btch*k,self.n_item])     #[batch,k,n_item]
         for i in range(n):
-            u_k_i[np.arange(len(u_k_i)),rank_chunk_reshape[:,i]] = 1/(i+10) 
-        return np.reshape(u_k_i,[btch,k,self.n_item])     
+            u_k_i[np.arange(len(u_k_i)),rank_chunk_reshape[:,i]] = 1/(i+10)
+        return np.reshape(u_k_i,[btch,k,self.n_item])
 
     def label_positive(self):
         """
@@ -651,7 +674,7 @@ class MetaData(object):
         self.users = user_item_pairs[:, 0]
 
         # 获取基础模型的数量
-        n_base_models = len(base_model)
+        n_base_models = len(base_models)
         # 创建得分矩阵，形状为 [样本数, 基模型数]
         label = np.zeros([len(self.train_meta), n_base_models])
         # 获取真实 (Ground Truth) 物品 ID，扩展维度成 [batch, 1]
@@ -673,7 +696,7 @@ class MetaData(object):
 
     def label_negative(self,neglist, NG):#neglist is 1-d list where each element denotes the negative item
         #返回负样本得分的函数
-        n_k = len(base_model)
+        n_k = len(base_models)
         assert len(neglist)==len(self.train_meta), 'wrong size'
         label = []
         for i in range(NG):
@@ -723,17 +746,16 @@ class Train_MF(object):
         MAP_valid = 0
         p = 0
         for epoch in range(0, self.epoch + 1):  # 每一次迭代训练
-            shuffle = np.arange(len(self.meta_data.UI_positive))
+            shuffle = np.arange(len(self.meta_data.user_item_pairs))
             # np.random.shuffle(shuffle)
 
             # 用户-物品对
-            user_item_pairs = self.meta_data.UI_positive  # none * 2
+            user_item_pairs = self.meta_data.user_item_pairs  # none * 2
 
             # 用户
             self.users = user_item_pairs[:, 0]
             # 时间戳
             self.times = self.timestamp()
-
             # 正采样
             self.items = user_item_pairs[:, 1]
 
@@ -749,7 +771,7 @@ class Train_MF(object):
             self.seq = np.array([self.data.latest_interaction[(line[0], line[1])] for line in user_item_pairs])
 
             # 正样本标签
-            meta_positive = self.meta_data.label_data #none * k  k denotes BM number
+            meta_positive = self.meta_data.user_item_pairs_labels #none * k  k denotes BM number
 
             # 负样本标签
             meta_negative = self.meta_data.label_negative(
@@ -801,7 +823,7 @@ class Train_MF(object):
 
             # 评估训练和验证数据集
             if epoch % 1 ==0:
-                print("Loss %.4f\t%.4f"%(loss[0], loss[1]))
+                print(f"Loss {loss[0]:.4f}\t{loss[1]:.4f}")
 
                 # 评估训练和验证数据集
                 if print_train:
@@ -818,26 +840,18 @@ class Train_MF(object):
                     test_meta=self.meta_data.test_meta,
                     topk=[20, 50]
                 )
-                init_test_TopK_valid = 0, 0, 0
 
-                print("Epoch %d \t TEST SET: %.4f MAP: %.4f, NDCG: %.4f, PREC: %.4f\n" %
-                      (epoch,
-                       init_test_TopK_valid[2],
-                       init_test_TopK_test[3],
-                       init_test_TopK_test[4],
-                       init_test_TopK_test[5]))
+                print(f"Epoch {epoch} \t TEST SET MAP: {init_test_TopK_test[0]:.4f}, NDCG: {init_test_TopK_test[1]:.4f}, PREC: {init_test_TopK_test[2]:.4f}\n")
 
                 with open("./process_result.txt", "a") as f:
-                    f.write("Epoch %d \t TEST SET: %.4f MAP: %.4f, NDCG: %.4f, PREC: %.4f\n" %
-                        (epoch,
-                         init_test_TopK_valid[2],
-                         init_test_TopK_test[3],
-                         init_test_TopK_test[4],
-                         init_test_TopK_test[5]))
+                    f.write(f"Epoch {epoch} \t TEST SET MAP: {init_test_TopK_test[0]:.4f}, NDCG: {init_test_TopK_test[1]:.4f}, PREC: {init_test_TopK_test[2]:.4f}\n")
 
                 if MAP_valid < np.mean(init_test_TopK_test[4:]):
                     MAP_valid = np.mean(init_test_TopK_test[4:])
                     result_print = init_test_TopK_test
+
+        # 保存最终模型
+        self.model.save_model(f"./models/{self.args.name}_{self.args.model}/.ckpt")
 
         with open("./result.txt","a") as f:
             f.write("{},{},{},{},{},{},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f}\n".format(

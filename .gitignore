@@ -4,3 +4,14 @@ basemodel/Kindle/ACF.npy
 basemodel/Kindle/IG.data
 basemodel/Kindle/feature.data
 __pycache__/
+models/Amazon_App_SASEM_final.ckpt.data-00000-of-00001
+models/Amazon_App_SASEM_final.ckpt.index
+models/Amazon_App_SASEM_final.ckpt.meta
+models/checkpoint
+models/Amazon_App_SASEM/.ckpt.data-00000-of-00001
+models/Amazon_App_SASEM/.ckpt.index
+models/Amazon_App_SASEM/.ckpt.meta
+models/Amazon_App_SASEM/checkpoint
+models/Amazon_App_SASEM/model.ckpt.data-00000-of-00001
+models/Amazon_App_SASEM/model.ckpt.index
+models/Amazon_App_SASEM/model.ckpt.meta
