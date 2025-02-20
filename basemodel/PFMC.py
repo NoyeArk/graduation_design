@@ -9,7 +9,7 @@ import argparse
 import numpy as np
 import tensorflow as tf
 
-from GCNdata import Data
+from SeqEnsemble.GCNdata import Data
 from Train_module import Train_basic
 
 import tensorflow.compat.v1 as tf

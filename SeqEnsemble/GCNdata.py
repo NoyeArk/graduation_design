@@ -169,10 +169,17 @@ class Data(object):
         )  # 53
 
         # 获取每个用户最近的交互记录
-        self.latest_interaction = self.get_latest_interaction(
-            user_item_pairs=self.dict_list['user_item'],
-            keep=args.maxlen
-        )  # 时间特征
+
+        try:
+            self.latest_interaction = self.get_latest_interaction(
+                user_item_pairs=self.dict_list['user_item'],
+                keep=args.maxlen
+            )  # 时间特征
+        except AttributeError:
+            self.latest_interaction = self.get_latest_interaction(
+                user_item_pairs=self.dict_list['user_item'],
+                keep=5
+            )  # 时间特征
 
         # 分割训练、验证和测试集
         self.train_set, self.valid_set, self.test_set = self.split_dataset(
@@ -443,7 +450,7 @@ class Data(object):
             item_ps = self.latest_interaction[(user, item)]
             for item_p in item_ps[-keep:]:
                 if item_p >= 0:
-                    markov[item_p,item] +=1
+                    markov[item_p, item] += 1
         return markov
 
     def pic_feature(self, name, dims=64):

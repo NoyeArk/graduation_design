@@ -6,8 +6,8 @@ from tqdm import tqdm
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
-from utils import *
-from GCNdata import Data
+from SeqEnsemble.utils import *
+from SeqEnsemble.GCNdata import Data
 
 N = 100  # 这个N是为了取前多少个items的score，大于N的设为0.
 
@@ -337,10 +337,15 @@ class Model(object):
         reuse = tf.AUTO_REUSE
 
         with tf.variable_scope("DIEN", reuse=reuse):
+            input_seq_masked = tf.where(
+                tf.equal(input_seq, -1),
+                tf.zeros_like(input_seq) + self.n_item,  # 使用 n_item 作为填充索引
+                input_seq
+            )
             # 1. 兴趣提取层 - 使用GRU提取兴趣表示
             # 获取序列的嵌入表示
             self.seq, item_emb_table = embedding(
-                input_seq,
+                input_seq_masked,
                 vocab_size=self.n_item + 1,
                 num_units=self.hidden_factor,
                 zero_pad=True,
@@ -417,10 +422,18 @@ class Model(object):
         mask = tf.expand_dims(tf.to_float(tf.not_equal(input_seq, -1)), -1)
         reuse = tf.AUTO_REUSE
         with tf.variable_scope("SASRec", reuse=reuse):
+            # 修改这里：确保所有的 -1 值都被替换为有效的索引值
+            # 使用 self.n_item 作为填充值 (padding token)
+            input_seq_masked = tf.where(
+                tf.equal(input_seq, -1),
+                tf.zeros_like(input_seq) + self.n_item,  # 使用 n_item 作为填充索引
+                input_seq
+            )
+            
             # sequence embedding, item embedding table
             self.seq, item_emb_table = embedding(
-                input_seq,
-                vocab_size=self.n_item + 1,  # error?
+                input_seq_masked,  # 使用处理后的序列
+                vocab_size=self.n_item + 1,  # 词汇表大小加1，为填充标记预留空间
                 num_units=self.hidden_factor,
                 zero_pad=True,
                 scale=True,
@@ -523,7 +536,7 @@ class Model(object):
         拟合一个批次。
 
         Args:
-            data (dict): 数据字典
+            data (`dict`): 数据字典
 
         Returns:
             loss_rec (`tf.Tensor`): 正样本损失
@@ -745,6 +758,8 @@ class Train_MF(object):
         # 初始结果
         MAP_valid = 0
         p = 0
+
+        max_map, max_ndcg, max_prec = (0, 0), (0, 0), (0, 0)
         for epoch in range(0, self.epoch + 1):  # 每一次迭代训练
             shuffle = np.arange(len(self.meta_data.user_item_pairs))
             # np.random.shuffle(shuffle)
@@ -767,7 +782,7 @@ class Train_MF(object):
                 negative_sample_count=negative_sample_count
             )
 
-            # 序列 none*seq
+            # 序列 none * seq
             self.seq = np.array([self.data.latest_interaction[(line[0], line[1])] for line in user_item_pairs])
 
             # 正样本标签
@@ -822,7 +837,7 @@ class Train_MF(object):
                 loss = self.model.partial_fit(self.feed_dict)
 
             # 评估训练和验证数据集
-            if epoch % 1 ==0:
+            if epoch % 1 == 0:
                 print(f"Loss {loss[0]:.4f}\t{loss[1]:.4f}")
 
                 # 评估训练和验证数据集
@@ -850,8 +865,12 @@ class Train_MF(object):
                     MAP_valid = np.mean(init_test_TopK_test[4:])
                     result_print = init_test_TopK_test
 
+                max_map = (max(max_map[0], result_print[0]), max(max_map[1], result_print[3]))
+                max_ndcg = (max(max_ndcg[0], result_print[1]), max(max_ndcg[1], result_print[4]))
+                max_prec = (max(max_prec[0], result_print[2]), max(max_prec[1], result_print[5]))
+
         # 保存最终模型
-        self.model.save_model(f"./models/{self.args.name}_{self.args.model}/.ckpt")
+        # self.model.save_model(f"./models/{self.args.name}_{self.args.model}/.ckpt")
 
         with open("./result.txt","a") as f:
             f.write("{},{},{},{},{},{},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f}\n".format(
@@ -861,12 +880,18 @@ class Train_MF(object):
                 self.args.model_module,
                 self.args.div_module,
                 self.args.tradeoff,
-                result_print[0],
-                result_print[1],
-                result_print[2],
-                result_print[3],
-                result_print[4],
-                result_print[5]
+                max_map[0],
+                max_ndcg[0],
+                max_prec[0],
+                max_map[1],
+                max_ndcg[1],
+                max_prec[1]
+                # result_print[0],
+                # result_print[1],
+                # result_print[2],
+                # result_print[3],
+                # result_print[4],
+                # result_print[5]
             ))
 
     def sample_negative(self, user_item_pairs, meta_data, negative_sample_count):

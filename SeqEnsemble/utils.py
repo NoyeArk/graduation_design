@@ -54,20 +54,16 @@ def embedding(inputs,
     '''Embeds a given tensor.
 
     Args:
-      inputs: A `Tensor` with type `int32` or `int64` containing the ids
-         to be looked up in `lookup table`.
-      vocab_size: An int. Vocabulary size.
-      num_units: An int. Number of embedding hidden units.
-      zero_pad: A boolean. If True, all the values of the fist row (id 0)
-        should be constant zeros.
-      scale: A boolean. If True. the outputs is multiplied by sqrt num_units.
-      scope: Optional scope for `variable_scope`.
-      reuse: Boolean, whether to reuse the weights of a previous layer
-        by the same name.
+      inputs: 一个类型为`int32`或`int64`的`Tensor`，包含需要在`lookup table`中查找的id。
+      vocab_size: 一个整数。词汇表大小。
+      num_units: 一个整数。嵌入隐藏单元的数量。
+      zero_pad: 一个布尔值。如果为True, 第一行(id 0)的所有值应该为常数0。
+      scale: 一个布尔值。如果为True, 输出会乘以sqrt(num_units)。
+      scope: `variable_scope`的可选作用域。
+      reuse: 布尔值，是否重用具有相同名称的前一层的权重。
 
     Returns:
-      A `Tensor` with one more rank than inputs's. The last dimensionality
-        should be `num_units`.
+      A `Tensor`, 其秩比输入多1。最后一维应为`num_units`。
         
     For example,
     

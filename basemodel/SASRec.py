@@ -5,7 +5,7 @@ Created on Wed Nov 14 20:31:32 2018
 @author: Yingpeng_Du
 """
 
-from GCNdata import Data
+from SeqEnsemble.GCNdata import Data
 import toolz
 import numpy as np
 import tensorflow as tf
@@ -494,7 +494,7 @@ class Train(Train_basic):
                     MAP_valid = np.sum(init_test_TopK_test)
                     self.meta_result = self.save_meta_result()
                 else:
-                    np.save("../datasets/%s/%s/%s.npy"%(basemodel,self.args.name,self.args.model),self.meta_result )
+                    np.save("../datasets/%s/%s/%s.npy"%(basemodel, self.args.name, self.args.model), self.meta_result)
                     break
 
     def sample_negative(self, data,num=10):

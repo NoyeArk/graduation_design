@@ -156,7 +156,7 @@ class Train_basic(object):
             score_block = score_block[:,:100].tolist()
             score.extend(score_block) 
         score = np.array(score,dtype=np.int64)
-        return np.concatenate((candidate,score),axis=1)
+        return np.concatenate((candidate, score),axis=1)
         
     def sample_negative(self, data,num=10):
         samples = np.random.randint( 0,self.n_item,size = (len(data),num))
