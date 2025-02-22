@@ -68,3 +68,28 @@ class NextKItemPredictor(nn.Module):
         _, indices = torch.topk(scores, self.num_next_items)
 
         return indices
+    
+    def save_checkpoint(self, path):
+        """
+        保存模型权重和优化器状态
+        
+        Args:
+            path (`str`): 保存路径
+        """
+        checkpoint = {
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict() if hasattr(self, 'optimizer') else None
+        }
+        torch.save(checkpoint, path)
+
+    def load_checkpoint(self, path):
+        """
+        加载模型权重和优化器状态
+        
+        Args:
+            path (`str`): 加载路径
+        """
+        checkpoint = torch.load(path)
+        self.load_state_dict(checkpoint['model_state_dict'])
+        if hasattr(self, 'optimizer') and checkpoint['optimizer_state_dict']:
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])

@@ -1,56 +1,63 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Fri Apr 22 12:50:04 2022
 
-@author: dyp
-"""
 import os
-import numpy as np
 import copy
-from tqdm import tqdm
 import toolz
+import numpy as np
+from tqdm import tqdm
 from time import time
+
 include_valid = True
 
+
 class Train_basic(object):
-    def __init__(self,args,data):
+    """
+    基础训练类
+    """
+    def __init__(self, args, data):
         self.args = args
         self.data = data
         self.batch_size = args.batch_size
         self.epoch = args.epoch
         self.entity = self.data.entity
         self.user_side_entity = self.data.user_side_entity
-        self.item_side_entity = self.data.item_side_entity          
-        # Data loadin
+        self.item_side_entity = self.data.item_side_entity
+        # Data loading
         self.n_user = self.data.entity_num['user']
         self.n_item = self.data.entity_num['item']
         self.include_valid = include_valid
+
+    def handle_loss(self, epoch, loss):
+        print(f"Epoch {epoch} - Loss: {loss:.4f}")
 
     def train(self):
         """
         训练模型
         """
         # 检查初始性能，初始结果
-        MAP_valid = 0
-        if include_valid == True:
-            PosSample = np.array(self.data.train)  # Array形式的二元组（user,item），none * 2
+        map_valid = 0
+        if include_valid:
+            pos_sample = np.array(self.data.train)  # Array形式的二元组(user, item), none * 2
             basemodel = 'basemodel_v'
         else:
             basemodel = 'basemodel'
-            PosSample = np.array(self.data.train + self.data.valid)  # Array形式的二元组（user,item），none * 2
+            pos_sample = np.array(self.data.train + self.data.valid)  # Array形式的二元组(user, item), none * 2
 
-        PosSample_with_p5 = np.concatenate([
-            PosSample,
-            np.array([self.data.latest_interaction[(line[0], line[1])] for line in PosSample])
-        ], axis=1)  # none*2+5
+        PosSample_with_p5 = np.concatenate(
+            [
+                pos_sample,
+                np.array([self.data.latest_interaction[(line[0], line[1])] for line in pos_sample])
+            ],
+            axis=1
+        )  # none * 2 + 5
 
         for epoch in tqdm(range(0, self.epoch+1)):  # 每一次迭代训练
-            np.random.shuffle(PosSample)
+            np.random.shuffle(pos_sample)
             # sample负样本采样
             NG = 1  # NG倍举例
-            NegSample = self.sample_negative(PosSample, NG)  # 采样，none * NG
+            NegSample = self.sample_negative(pos_sample, NG)  # 采样，none * NG
 
-            for user_chunk in toolz.partition_all(self.batch_size, [i for i in range(len(PosSample))]):                
+            for user_chunk in toolz.partition_all(self.batch_size, [i for i in range(len(pos_sample))]):
                 chunk = list(user_chunk)
                 neg_chunk = np.array(NegSample[chunk], dtype=np.int64)[:,0]  # none*1
                 train_chunk_p5 = PosSample_with_p5[chunk]  # none*2+5
@@ -64,17 +71,20 @@ class Train_basic(object):
                 # meta-path feature
                 self.feed_dict = {'feedback': feedback, 'labels': labels}
                 loss = self.model.partial_fit(self.feed_dict)
+                self.handle_loss(epoch, loss)
 
             t2 = time()
 
             # 评估训练和验证数据集
             if epoch % int(self.args.epoch / 10) == 0:
                 for topk in [10]:
-                    init_test_TopK_test = self.evaluate_TopK(self.data.test,topk) 
-                    print("Epoch %d Top%d \t TEST SET:%.4f MAP:%.4f,NDCG:%.4f,PREC:%.4f;[%.1f s]\n"
-                      %(epoch,topk,0,init_test_TopK_test[0],init_test_TopK_test[1],init_test_TopK_test[2], time()-t2))
-                if MAP_valid < np.sum(init_test_TopK_test) and epoch<self.epoch:
-                    MAP_valid = np.sum(init_test_TopK_test)
+                    init_test_TopK_test = self.evaluate_TopK(self.data.test, topk)
+                    print(
+                        "Epoch %d Top%d \t TEST SET:%.4f MAP:%.4f, NDCG:%.4f, PREC:%.4f;[%.1f s]\n"
+                        % (epoch, topk, 0, init_test_TopK_test[0], init_test_TopK_test[1], init_test_TopK_test[2], time() - t2)
+                    )
+                if map_valid < np.sum(init_test_TopK_test) and epoch<self.epoch:
+                    map_valid = np.sum(init_test_TopK_test)
                     self.meta_result = self.save_meta_result()
                 else:
                     dir_name = "../datasets/%s/%s"%(basemodel,self.args.name)
@@ -84,38 +94,58 @@ class Train_basic(object):
                     np.save("../datasets/%s/%s/%s.npy"%(basemodel,self.args.name,self.args.model),self.meta_result )
                     break
 
-    def train_attribute(self):  # fit a dataset
+    def train_attribute(self):
+        """
+        训练属性模型
+        """
         MAP_valid = 0
-        if include_valid ==True:
-            PosSample = np.array(self.data.train) # Array形式的二元组（user,item），none * 2
+        if include_valid:
+            positive_samples = np.array(self.data.train_set)  # Array 形式的二元组(user, item), none * 2
             basemodel = 'basemodel_v'
         else:
             basemodel = 'basemodel'
-        PosSample_with_p5 = np.concatenate([PosSample,np.array([\
-                    self.data.latest_interaction[(line[0],line[1])] for line in PosSample])],axis =1)#none*2+5
-        for epoch in tqdm(range(0,self.epoch+1)): #每一次迭代训练
-            np.random.shuffle(PosSample)
-            #sample负样本采样
-            np.random.shuffle(PosSample)
-            #sample负样本采样
-            NG = 1#NG倍举例
-            NegSample = self.sample_negative(PosSample,NG)#采样，none * NG
-            for user_chunk in toolz.partition_all(self.batch_size,[i for i in range(len(PosSample))] ):                
+
+        # 这里是用于训练属性模型的数据准备部分
+        positive_samples_concat_last5 = np.concatenate(
+            [
+                positive_samples,
+                np.array([self.data.latest_interaction.get((line[0], line[1]), [0] * 5) for line in positive_samples])
+            ],
+            axis=1
+        )  # none * 2 + 5
+
+        for epoch in tqdm(range(0, self.epoch + 1)): #每一次迭代训练
+            np.random.shuffle(positive_samples)
+            # sample 负样本采样
+            negative_sample_num = 1  # NG 倍举例
+            negative_samples = self.sample_negative(positive_samples, negative_sample_num)  # 采样, none * NG
+
+            for user_chunk in toolz.partition_all(self.batch_size, [i for i in range(len(positive_samples))]):
                 chunk = list(user_chunk)
-                neg_chunk = np.array(NegSample[chunk],dtype = np.int64)#none*1
-                train_chunk_p5 = PosSample_with_p5[chunk]#none*2+5
-                train_chunk_p5_copy = copy.deepcopy(train_chunk_p5)            
-                train_chunk_p5_copy[:,1] = neg_chunk
-                    
-                feedback = np.stack([train_chunk_p5,train_chunk_p5_copy],axis=1)
-                feedback = np.reshape(feedback,[-1,2+5])
-                labels = np.reshape(np.stack([np.ones(len(chunk)),np.zeros(len(chunk))],axis=1),[-1,1])
-                #meta-path feature
-                self.feed_dict = {'feedback':feedback,'labels':labels,'all_attributes':self.item_attributes}
-                loss =  self.model.partial_fit(self.feed_dict)
+
+                negative_samples_chunk = np.array(negative_samples[chunk], dtype=np.int64)  # none * 1
+                positive_samples_concat_last5_trunk = positive_samples_concat_last5[chunk]  # none * 2 + 5
+                positive_samples_concat_last5_trunk_copy = copy.deepcopy(positive_samples_concat_last5_trunk)
+                positive_samples_concat_last5_trunk_copy[:, 1] = negative_samples_chunk
+
+                feedback = np.stack([positive_samples_concat_last5_trunk, positive_samples_concat_last5_trunk_copy], axis=1)
+                feedback = np.reshape(feedback,[-1, 2 + 5])
+                labels = np.reshape(
+                    np.stack([np.ones(len(chunk)), np.zeros(len(chunk))], axis=1),
+                    [-1, 1]
+                )
+
+                # 模型输入特征
+                self.feed_dict = {
+                    'feedback': feedback,
+                    'labels': labels,
+                    'all_attributes': self.item_attributes
+                }
+                loss = self.model.partial_fit(self.feed_dict)
+
             t2 = time()
 
-         # evaluate training and validation datasets
+            # evaluate training and validation datasets
             if epoch % int(self.args.epoch/10) == 0:
                 for topk in [10]:
                     init_test_TopK_test = self.evaluate_TopK(self.data.test,topk) 
@@ -129,7 +159,7 @@ class Train_basic(object):
                     if not os.path.isdir(dir_name):
                         os.makedirs(dir_name)
                     np.save("../datasets/%s/%s/%s.npy"%(basemodel,self.args.name,self.args.model),self.meta_result )
-                    break                
+                    break
 
     def save_meta_result(self):
         #inputs:
@@ -149,7 +179,7 @@ class Train_basic(object):
             last_iteraction_block = last_iteraction[_*num:(_+1)*num]
             feedback_block = np.concatenate((user_item_block,last_iteraction_block),axis=1)
             try:
-                score_block = self.model.topk(feedback_block,self.item_attributes)                
+                score_block = self.model.topk(feedback_block, self.item_attributes) 
             except:
                 score_block = self.model.topk(feedback_block)
             
@@ -157,13 +187,25 @@ class Train_basic(object):
             score.extend(score_block) 
         score = np.array(score,dtype=np.int64)
         return np.concatenate((candidate, score),axis=1)
-        
-    def sample_negative(self, data,num=10):
-        samples = np.random.randint( 0,self.n_item,size = (len(data),num))
+
+    def sample_negative(self, positive_samples, sample_num=10):
+        """
+        采样负样本
+
+        Args:
+            positive_samples (`np.ndarray`): 二元组(user, item), none * 2
+            sample_num (`int`): 采样数目
+
+        Returns:
+            `np.ndarray`: 采样的负样本
+        """
+        samples = np.random.randint(0, self.n_item, size=(len(positive_samples), sample_num))
         return samples
 
     def collect_attributes(self):
-        #return item * 
+        """
+        收集属性
+        """
         NUM = 3
         attributes = []
         start_index = 0
@@ -213,7 +255,7 @@ class Train_basic(object):
                 n = 0 
 #                print(prediction[i])
                 for it in prediction[i]:
-                    if n> topk -1:
+                    if n > topk - 1:
                         result_MAP.append(0.0)
                         result_NDCG.append(0.0)
                         result_PREC.append(0.0)
@@ -222,9 +264,9 @@ class Train_basic(object):
                     elif it == item:
                         # print([it,item])
                         result_MAP.append(1.0)
-                        result_NDCG.append(np.log(2)/np.log(n+2))
-                        result_PREC.append(1/(n+1))
-                        n=0
+                        result_NDCG.append(np.log(2) / np.log(n + 2))
+                        result_PREC.append(1 / (n + 1))
+                        n = 0
                         break
                     elif it in self.data.set_forward['train'][user] or it in self.data.set_forward['valid'][user]:
                         continue

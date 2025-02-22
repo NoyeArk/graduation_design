@@ -15,11 +15,11 @@ class Pipeline:
         初始化流水线参数
         
         Args:
-            embedding_dim (int): 嵌入维度
-            num_next_items (int): 预测接下来的物品数量
-            batch_size (int): 批次大小
-            epochs (int): 训练轮数
-            lr (float): 学习率
+            embedding_dim (`int`): 嵌入维度
+            num_next_items (`int`): 预测接下来的物品数量
+            batch_size (`int`): 批次大小
+            epochs (`int`): 训练轮数
+            lr (`float`): 学习率
         """
         self.data = Data()
 
@@ -76,10 +76,12 @@ class Pipeline:
             ndcg = self.evaluate()
             print(f'Epoch {epoch+1}, NDCG: {ndcg:.4f}')
 
+        self.model.save_checkpoint('model.pth')
+
     def evaluate(self):
         """
         评估模型
-        
+
         Returns:
             float: NDCG分数
         """

@@ -1,32 +1,23 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Wed Nov 14 20:31:32 2018
 
-@author: Yingpeng_Du
-"""
-
-from SeqEnsemble.GCNdata import Data
 import toolz
+import argparse
 import numpy as np
 import tensorflow as tf
-from time import time
-import argparse
-import copy
-from tqdm import tqdm 
-import scipy.sparse as sp
+
+from SeqEnsemble.GCNdata import Data
 from Train_module import Train_basic
 
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
-
 NUM = 3
+
 def parse_args(name,factor,seed,batch_size):
-        
     parser = argparse.ArgumentParser(description="Run .")  
-    parser.add_argument('--name', nargs='?', default= name )    
+    parser.add_argument('--name', nargs='?', default= name )
     parser.add_argument('--model', nargs='?', default='ACF')
-    parser.add_argument('--path', nargs='?', default='../datasets/processed/'+name,
+    parser.add_argument('--path', nargs='?', default='/Users/mac/Desktop/graduation_design/old_datasets/processed/'+name,
                         help='Input data path.')
     parser.add_argument('--dataset', nargs='?', default=name,
                         help='Choose a dataset.')
@@ -40,7 +31,7 @@ def parse_args(name,factor,seed,batch_size):
                         help='Learning rate.')
     parser.add_argument('--optimizer', nargs='?', default='AdamOptimizer',
                         help='Specify an optimizer type (AdamOptimizer, AdagradOptimizer, GradientDescentOptimizer, MomentumOptimizer).')
-    parser.add_argument('--seed', type=int, default=seed)  
+    parser.add_argument('--seed', type=int, default=seed)
     parser.add_argument('--epoch', type=int, default=100,help='Number of epochs.')
 
     return parser.parse_args()
@@ -75,59 +66,59 @@ class ACF(object):
             # Input data.
             self.weights = self._initialize_weights()
             self.feedback = tf.placeholder(tf.int32, shape=[None, 7])  # None * 2+ 5
-            self.labels = tf.placeholder(tf.float32, shape=[None,1])# none 
-            self.all_attributes = tf.placeholder(tf.int32, shape=[self.n_item,self.n_attribute,NUM])
-            self.item_attribute = tf.reduce_mean(tf.nn.embedding_lookup(self.weights['attribute_embeddings'],self.all_attributes),axis=2)#[n_item,num_attri,k]
+            self.labels = tf.placeholder(tf.float32, shape=[None, 1])  # none
+            self.all_attributes = tf.placeholder(tf.int32, shape=[self.n_item, self.n_attribute, NUM])
+            self.item_attribute = tf.reduce_mean(tf.nn.embedding_lookup(self.weights['attribute_embeddings'], self.all_attributes), axis=2)#[n_item,num_attri,k]
             self.visacou = []
+
             try:
-                visual =  tf.constant(self.data.vis,dtype=tf.float32)
+                # 将视觉特征转换为 tensorflow 常量并添加到 visacou 列表中
+                visual = tf.constant(self.data.vis, dtype=tf.float32)
                 self.visacou.append(visual)
             except:
-                pass 
+                pass
+
             try:
-                acoustic =  tf.constant(self.data.acou,dtype=tf.float32)
+                # 将音频特征转换为 tensorflow 常量并添加到 visacou 列表中
+                acoustic = tf.constant(self.data.acou, dtype=tf.float32)
                 self.visacou.append(acoustic)
             except:
-                pass             
+                pass
+
             if self.visacou != []:
-                self.visacou = tf.stack(self.visacou,axis=1)#[n_item,1/2,k]
+                self.visacou = tf.stack(self.visacou, axis=1)#[n_item,1/2,k]
                 try:
                     self.item_content = tf.concat([self.item_attribute,self.visacou],axis=1)#[n_item,num_attri,k]    
                 except:
-                    self.item_content = self.visacou#[n_item,num_attri,k]    
-                    
+                    self.item_content = self.visacou#[n_item,num_attri,k]
             else:
                 self.item_content = self.item_attribute
 
+            self.users_idx = self.feedback[:, 0]  # none
+            self.items_idx = self.feedback[:, 1]  # none
+            self.item_sequence_idx = self.feedback[:, 2:] # none * 5
 
-            self.users_idx = self.feedback[:,0]#none
-            self.items_idx = self.feedback[:,1]#none
-            self.item_sequence_idx = self.feedback[:,2:] # none * 5
-            
-            
             self.users_embeddings = tf.nn.embedding_lookup(self.weights['user_embeddings'],self.users_idx)#none * k
             self.item_sequence_content = tf.nn.embedding_lookup(self.item_content,self.item_sequence_idx)#none * 5 * num_attri * k
             
             self.trans_item_sequence_content = tf.layers.dense(self.item_sequence_content,self.hidden_factor,use_bias=False)#none * 5 * num_attri * k
             self.users_trans1 = tf.layers.dense(self.users_embeddings,self.hidden_factor)#none * k
-            
+
             self.F1 = tf.expand_dims(tf.expand_dims(self.users_trans1,1),1) + self.trans_item_sequence_content#none * 5 * num_attri * k
             b_ilm = tf.nn.softmax(tf.layers.dense(tf.nn.relu(self.F1),1),axis=2) #none * 5 * num_attri * 1
             self.xl = tf.reduce_sum(b_ilm*self.item_sequence_content,axis=2)#none * 5 * k
-            
+
             self.trans_content = tf.layers.dense(self.xl,self.hidden_factor,use_bias=False)#none * 5 * k
-            
             
             self.items_embs1 = tf.nn.embedding_lookup(self.weights['item_embeddings1'],self.item_sequence_idx)#none * 5  * k
             self.items_embs2 = tf.nn.embedding_lookup(self.weights['item_embeddings2'],self.item_sequence_idx)#none * 5  * k
-            
+
             self.F2 = tf.expand_dims(tf.layers.dense(self.users_embeddings,self.hidden_factor),1) + self.trans_content \
                          +tf.layers.dense(self.items_embs1,self.hidden_factor,use_bias = False)+tf.layers.dense(self.items_embs2,self.hidden_factor,use_bias = False)#none * 5  * k
-            
+
             self.ail = tf.nn.softmax(tf.layers.dense(tf.nn.relu(self.F2),1),axis=1)#none * 5  * 1
             self.preference = self.users_embeddings + tf.reduce_sum(self.ail*self.items_embs1,axis=1)#none * k
-            
-            
+
             self.item_embedddings = tf.nn.embedding_lookup(self.weights['item_embeddings2'],self.items_idx)#none * k
             #pair interaction
             self.out = tf.reduce_sum( self.item_embedddings * self.preference,axis=-1,keep_dims=True) #none * 1            
@@ -135,22 +126,14 @@ class ACF(object):
 
             self.loss_reg = 0
             for wgt in tf.trainable_variables():
-                self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)      
+                self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)
 
-            self.loss = self.loss_rec + self.loss_reg 
+            self.loss = self.loss_rec + self.loss_reg
             if self.optimizer_type == 'AdamOptimizer':
                 self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-
-#                self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
-#                grads = self.optimizer.compute_gradients(self.loss)
-#                for i, (g, v) in enumerate(grads):
-#                    if g is not None:
-#                        grads[i] = (tf.clip_by_norm(g, 10), v)  # clip gradients
-#                self.train_op = self.optimizer.apply_gradients(grads)    
-                
             elif self.optimizer_type == 'AdagradOptimizer':
                 self.optimizer = tf.train.AdagradOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-            
+
             out = tf.matmul(self.preference, self.weights['item_embeddings2'],transpose_b=True)
             self.out_all_topk = tf.nn.top_k(out,200)
 
@@ -166,38 +149,47 @@ class ACF(object):
         config.gpu_options.per_process_gpu_memory_fraction = 0.9
         config.allow_soft_placement = True
         return tf.Session(config=config)
-#    def (self,):
-        
+
     def _initialize_weights(self):
         all_weights = dict()
-        
         all_weights['user_embeddings'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_user, self.hidden_factor]),dtype = tf.float32) # features_M * K
         all_weights['item_embeddings1'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_item, self.hidden_factor]),dtype = tf.float32) # features_M * K
         all_weights['item_embeddings2'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_item, self.hidden_factor]),dtype = tf.float32) # features_M * K
         with tf.name_scope('attributes'):
-#            all_weights['attributes_att'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.n_attribute, self.hidden_factor]),dtype = tf.float32) # features_M * K
-
             all_weights['attribute_embeddings'] =  tf.Variable(np.random.normal(0.0, 0.01,[self.num_a, self.hidden_factor]),dtype = tf.float32) # features_M * K
 
         return all_weights
 
-
     def partial_fit(self, data):  # fit a batch
-        
-        feed_dict = {self.labels:data['labels'],self.feedback: data['feedback'],self.all_attributes:data['all_attributes']}
-        loss_rec,loss_reg, opt = self.sess.run((self.loss_rec,self.loss_reg, self.optimizer), feed_dict=feed_dict)
-        return loss_rec,0.0,loss_reg
-    def pairwise_loss(self,inputx,labels):
-#        input none*1
-#        label none*1
+        feed_dict = {
+            self.labels: data['labels'],
+            self.feedback: data['feedback'],
+            self.all_attributes: data['all_attributes']
+        }
+        loss_rec, loss_reg, _ = self.sess.run(
+            (self.loss_rec, self.loss_reg, self.optimizer),
+            feed_dict=feed_dict
+        )
+        return loss_rec, 0.0, loss_reg
+
+    def pairwise_loss(self, inputx, labels):
+        """
+        计算 pairwise loss
+
+        Args:
+            inputx (`tf.Tensor`): none*1
+            labels (`tf.Tensor`): none*1
+
+        Returns:
+            loss (`tf.Tensor`): none*1
+        """
         inputx_f = inputx[1:]
         paddle = tf.expand_dims(tf.zeros(tf.shape(inputx[0])),axis=0)
         inputx_f = tf.concat([inputx_f,paddle],axis=0)
         loss = -tf.reduce_sum(tf.log(tf.sigmoid((inputx-inputx_f)*labels)))
         return loss
         
-    def topk(self,user_item_feedback,all_attributes):
-        
+    def topk(self, user_item_feedback, all_attributes):
         feed_dict = {self.feedback: user_item_feedback,self.all_attributes:all_attributes}
         _, self.prediction = self.sess.run(self.out_all_topk,feed_dict)     
         return self.prediction
@@ -207,17 +199,25 @@ class Train(Train_basic):
     def __init__(self,args,data):
         super(Train,self).__init__(args,data)
         self.item_attributes = self.collect_attributes()
-        self.model = ACF(self.args,self.data ,args.hidden_factor,args.lr, args.lamda, args.optimizer)
+        self.model = ACF(self.args,self.data, args.hidden_factor,args.lr, args.lamda, args.optimizer)
 
     def sample_negative(self, data,num=10):
         samples = np.random.randint( 0,self.n_item,size = (len(data)))
         return samples
 
-                
-def ACF_main(name,factor,seed,batch_size):    
-#    name,factor,Topk,seed ,batch_size = 'CiaoDVD',64,10,0,2048
-    args = parse_args(name,factor,seed,batch_size)
-    data = Data(args,seed)#获取数据
-    session_DHRec = Train(args,data)
+
+def ACF_main(name, factor, seed, batch_size):
+    """
+    主函数
+
+    Args:
+        name (`str`): 数据集名称
+        factor (`int`): 隐向量维度
+        seed (`int`): 随机种子
+        batch_size (`int`): 批量大小
+    """
+    # name, factor, Topk, seed ,batch_size = 'CiaoDVD',64,10,0,2048
+    args = parse_args(name, factor, seed, batch_size)
+    data = Data(args, seed)  # 获取数据
+    session_DHRec = Train(args, data)
     session_DHRec.train_attribute()
-    # 

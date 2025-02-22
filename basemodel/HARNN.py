@@ -155,11 +155,24 @@ class HARNN(object):
 
 
     def partial_fit(self, data):  # fit a batch
-        
-        feed_dict = {self.neg_items:np.random.randint(0,self.n_item,[len(data['feedback']),5]),self.feedback: data['feedback'],self.all_attributes:data['all_attributes']}
+        feed_dict = {
+            self.neg_items: np.random.randint(0, self.n_item, [len(data['feedback']), 5]),
+            self.feedback: data['feedback'],
+            self.all_attributes: data['all_attributes']
+        }
         loss_rec,loss_reg, opt = self.sess.run((self.loss_rec,self.loss_reg, self.optimizer), feed_dict=feed_dict)
         return loss_rec,0.0,loss_reg
+
     def pairwise_loss(self,inputx,labels):
+        """
+        计算pairwise的loss
+
+        Args:
+            inputx (`tensor`): shape=[batch_size, 1]
+
+        Returns:
+            loss (`tensor`): shape=[1]
+        """
 #        input none*1
 #        label none*1
         inputx_f = inputx[1:]

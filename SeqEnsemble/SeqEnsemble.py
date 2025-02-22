@@ -329,7 +329,7 @@ class Model(object):
         
         Args:
             input_seq (`tf.Tensor`): 输入序列 [batch_size, seq_len]
-            
+
         Returns:
             seq_emb (`tf.Tensor`): DIEN的输出 [batch_size, seq_len, hidden_factor]
         """
