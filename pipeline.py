@@ -25,7 +25,7 @@ class Pipeline:
 
         self.model = NextKItemPredictor(
             num_users=self.data.num_users,
-            num_items=self.data.num_movies,
+            num_items=self.data.num_items,
             embedding_dim=embedding_dim,
             num_next_items=num_next_items
         )
@@ -41,42 +41,54 @@ class Pipeline:
         """
         for epoch in tqdm(range(self.epochs), desc='训练进度'):
             total_loss = 0
-            batch_count = 0
 
-            # 遍历每个用户的训练数据
             self.model.train()
-            for user_id, movie_list in self.data.train_data.items():
-                if len(movie_list) < 2:
-                    continue
+            user_ids = list(self.data.train_data.keys())
+            num_batches = len(user_ids) // self.batch_size
 
-                # 准备训练数据
-                user_tensor = torch.LongTensor([user_id])
-                history_tensor = torch.LongTensor([movie_list[:-1]])
-                target_tensor = torch.zeros(1, self.data.num_movies)
-                target_tensor[0, movie_list[-1]] = 1
+            for batch_idx in range(num_batches):
+                batch_user_ids = user_ids[batch_idx * self.batch_size:(batch_idx + 1) * self.batch_size]
+                batch_loss = 0
 
-                # 前向传播
-                pred = self.model(user_tensor, history_tensor)
-                loss = self.criterion(pred, target_tensor)
+                for user_id in batch_user_ids:
+                    items_list = self.data.train_data[user_id]
+                    if len(items_list) < 2:
+                        continue
+
+                    # 生成正负样本对
+                    pos_item = items_list[-1]
+                    neg_item = self.data.sample_negative_item(user_id)
+
+                    user_tensor = torch.LongTensor([user_id])
+                    pos_tensor = torch.LongTensor([pos_item])
+                    neg_tensor = torch.LongTensor([neg_item])
+
+                    # 前向传播
+                    history_tensor = torch.LongTensor(items_list[:-1])
+                    pred_pos = self.model(user_tensor, history_tensor, pos_tensor)
+                    pred_neg = self.model(user_tensor, history_tensor, neg_tensor)
+
+                    # 使用 pairwise_loss
+                    labels = torch.tensor([1.0])  # 假设标签为1表示正样本对
+                    loss = self.pairwise_loss(torch.cat((pred_pos, pred_neg)), labels)
+
+                    batch_loss += loss
 
                 # 反向传播
                 self.optimizer.zero_grad()
-                loss.backward()
+                batch_loss.backward()
                 self.optimizer.step()
 
-                total_loss += loss.item()
-                batch_count += 1
+                total_loss += batch_loss.item()
 
-                if batch_count % self.batch_size == 0:
-                    print(f'Epoch {epoch+1}, Batch {batch_count//self.batch_size}, '
-                          f'Average Loss: {total_loss/self.batch_size:.4f}')
-                    total_loss = 0
+                print(f'Epoch {epoch+1}, Batch {batch_idx+1}/{num_batches}, '
+                      f'Average Loss: {batch_loss.item()/self.batch_size:.4f}')
 
             # 评估模型
             ndcg = self.evaluate()
             print(f'Epoch {epoch+1}, NDCG: {ndcg:.4f}')
 
-        self.model.save_checkpoint('model.pth')
+        self.model.save_checkpoint('model0223.pth')
 
     def evaluate(self):
         """
@@ -89,12 +101,12 @@ class Pipeline:
         ndcg_scores = []
 
         with torch.no_grad():
-            for user_id, movie_list in self.data.valid_data.items():
-                if len(movie_list) < 2:
+            for user_id, items_list in self.data.valid_data.items():
+                if len(items_list) < 2:
                     continue
 
                 user_tensor = torch.LongTensor([user_id])
-                history_tensor = torch.LongTensor([movie_list[:-1]])
+                history_tensor = torch.LongTensor([items_list[:-1]])
 
                 # 获取推荐列表
                 recommended_items = self.model.recommend_next_k_items(user_tensor, history_tensor)[0]
@@ -102,7 +114,7 @@ class Pipeline:
                 # 计算DCG
                 dcg = 0
                 for i, item in enumerate(recommended_items):
-                    if item.item() == movie_list[-1]:
+                    if item.item() == items_list[-1]:
                         # 使用log2(i+2)是因为i从0开始
                         dcg += 1 / torch.log2(torch.tensor(i + 2, dtype=torch.float))
                         break
@@ -116,3 +128,18 @@ class Pipeline:
 
         # 返回平均 NDCG
         return sum(ndcg_scores) / len(ndcg_scores) if ndcg_scores else 0
+
+    def pairwise_loss(self, pred, labels):
+        """
+        成对损失函数
+
+        Args:
+            pred (`torch.Tensor`): 预测数据
+            labels (`torch.Tensor`): 标签
+
+        Returns:
+            loss (`torch.Tensor`): 损失
+        """
+        inputx_f = torch.cat((pred[1:], torch.zeros_like(pred[0]).unsqueeze(0)), dim=0)
+        loss = -torch.sum(torch.log(torch.sigmoid((pred - inputx_f) * labels)))
+        return loss

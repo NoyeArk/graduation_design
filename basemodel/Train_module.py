@@ -37,33 +37,33 @@ class Train_basic(object):
         # 检查初始性能，初始结果
         map_valid = 0
         if include_valid:
-            pos_sample = np.array(self.data.train)  # Array形式的二元组(user, item), none * 2
+            positive_samples = np.array(self.data.train)  # Array形式的二元组(user, item), none * 2
             basemodel = 'basemodel_v'
         else:
             basemodel = 'basemodel'
-            pos_sample = np.array(self.data.train + self.data.valid)  # Array形式的二元组(user, item), none * 2
+            positive_samples = np.array(self.data.train + self.data.valid)  # Array形式的二元组(user, item), none * 2
 
-        PosSample_with_p5 = np.concatenate(
+        positive_samples_concat_last5 = np.concatenate(
             [
-                pos_sample,
-                np.array([self.data.latest_interaction[(line[0], line[1])] for line in pos_sample])
+                positive_samples,
+                np.array([self.data.latest_interaction[(line[0], line[1])] for line in positive_samples])
             ],
             axis=1
         )  # none * 2 + 5
 
         for epoch in tqdm(range(0, self.epoch+1)):  # 每一次迭代训练
-            np.random.shuffle(pos_sample)
+            np.random.shuffle(positive_samples)
             # sample负样本采样
-            NG = 1  # NG倍举例
-            NegSample = self.sample_negative(pos_sample, NG)  # 采样，none * NG
+            negative_sample_num = 1  # NG倍举例
+            NegSample = self.sample_negative(positive_samples, negative_sample_num)  # 采样，none * NG
 
-            for user_chunk in toolz.partition_all(self.batch_size, [i for i in range(len(pos_sample))]):
+            for user_chunk in toolz.partition_all(self.batch_size, [i for i in range(len(positive_samples))]):
                 chunk = list(user_chunk)
                 neg_chunk = np.array(NegSample[chunk], dtype=np.int64)[:,0]  # none*1
-                train_chunk_p5 = PosSample_with_p5[chunk]  # none*2+5
-                train_chunk_p5_copy = copy.deepcopy(train_chunk_p5)        
+                train_chunk_p5 = positive_samples_concat_last5[chunk]  # none*2+5
+                train_chunk_p5_copy = copy.deepcopy(train_chunk_p5)
                 train_chunk_p5_copy[:,1] = neg_chunk
-                    
+
                 feedback = np.stack([train_chunk_p5, train_chunk_p5_copy], axis=1)
                 feedback = np.reshape(feedback, [-1, 2 + 5])
                 labels = np.reshape(np.stack([np.ones(len(chunk)), np.zeros(len(chunk))], axis=1), [-1, 1])
@@ -139,7 +139,7 @@ class Train_basic(object):
                 self.feed_dict = {
                     'feedback': feedback,
                     'labels': labels,
-                    'all_attributes': self.item_attributes
+                    'item_attributes': self.item_attributes
                 }
                 loss = self.model.partial_fit(self.feed_dict)
 

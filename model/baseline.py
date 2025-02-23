@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class NextKItemPredictor(nn.Module):
@@ -22,36 +23,35 @@ class NextKItemPredictor(nn.Module):
         self.item_embeddings = torch.nn.Embedding(num_items, embedding_dim)
 
         self.predictor = torch.nn.Sequential(
-            torch.nn.Linear(embedding_dim * 2, 256),
+            torch.nn.Linear(embedding_dim * 3, 64),
             torch.nn.ReLU(),
-            torch.nn.Linear(256, 128),
+            torch.nn.Linear(64, 32),
             torch.nn.ReLU(),
-            torch.nn.Linear(128, num_items)
+            torch.nn.Linear(32, 1)
         )
 
         self.num_next_items = num_next_items
 
-    def forward(self, user_ids, item_history):
+    def forward(self, user_id, item_history, item_id):
         """
         前向传播
         
         Args:
-            user_ids (`torch.Tensor`): 用户ID, shape=[batch_size]
-            item_history (`torch.Tensor`): 用户历史交互物品序列, shape=[batch_size, seq_len]
-            
+            user_id (`torch.Tensor`): 用户ID, shape=[1]
+            item_history (`torch.Tensor`): 用户历史交互物品序列, shape=[seq_len]
+            item_id (`torch.Tensor`): 目标物品ID, shape=[1]
+
         Returns:
             推荐的下一个物品的概率分布, shape=[batch_size, num_items]
         """
-        user_embed = self.user_embeddings(user_ids)  # [batch_size, embedding_dim]
+        user_embed = self.user_embeddings(user_id)  # [embedding_dim]
+        item_embed = self.item_embeddings(item_id)  # [embedding_dim]
+        history_embed = self.item_embeddings(item_history).mean(dim=0, keepdim=True)  # [embedding_dim]
 
-        item_embeds = self.item_embeddings(item_history)  # [batch_size, seq_len, embedding_dim]
-        item_embed_mean = torch.mean(item_embeds, dim=1)  # [batch_size, embedding_dim]
+        concat_embed = torch.cat([user_embed, item_embed, history_embed], dim=1)  # [1, embedding_dim*3]
+        score = self.predictor(concat_embed).unsqueeze(0)  # [1]
 
-        concat_embed = torch.cat([user_embed, item_embed_mean], dim=1)  # [batch_size, embedding_dim*2]
-
-        scores = self.predictor(concat_embed)  # [batch_size, num_items]
-
-        return torch.sigmoid(scores)
+        return torch.sigmoid(score)
 
     def recommend_next_k_items(self, user_ids, item_history):
         """
@@ -93,3 +93,30 @@ class NextKItemPredictor(nn.Module):
         self.load_state_dict(checkpoint['model_state_dict'])
         if hasattr(self, 'optimizer') and checkpoint['optimizer_state_dict']:
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+
+class BPRWithHistory(nn.Module):
+    def __init__(self, num_users, num_items, embedding_dim):
+        super(BPRWithHistory, self).__init__()
+        self.user_embeddings = nn.Embedding(num_users, embedding_dim)
+        self.item_embeddings = nn.Embedding(num_items, embedding_dim)
+
+    def forward(self, user_id, pos_item_id, neg_item_id, item_history):
+        user_embed = self.user_embeddings(user_id)  # [embedding_dim]
+        pos_item_embed = self.item_embeddings(pos_item_id)  # [embedding_dim]
+        neg_item_embed = self.item_embeddings(neg_item_id)  # [embedding_dim]
+        
+        # History embedding
+        history_embed = self.item_embeddings(item_history).mean(dim=0)  # [embedding_dim]
+
+        # Combine embeddings
+        user_feature = torch.cat([user_embed, history_embed], dim=0)  # [embedding_dim*2]
+
+        # Calculate scores
+        pos_score = torch.dot(user_feature, pos_item_embed)
+        neg_score = torch.dot(user_feature, neg_item_embed)
+
+        return pos_score, neg_score
+
+    def bpr_loss(self, pos_score, neg_score):
+        return -torch.log(torch.sigmoid(pos_score - neg_score)).mean()

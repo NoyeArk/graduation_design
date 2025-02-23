@@ -214,6 +214,8 @@ class Data(object):
                 entity_count_2=self.entity_num[entity],
                 user_item_pairs=self.dict_list['item_' + entity]
             )
+
+        # 将用户-其他实体对转化为关系字典
         for entity in self.user_side_entity:
             self.dict_list['user_' + entity], \
             self.dict_entity2id[entity], \
@@ -430,7 +432,7 @@ class Data(object):
                 if self.name=='ml100k':
                     line = line.strip().split(',')
                 b_other.append(line)
-        bs,others = zip(*b_other)
+        bs, others = zip(*b_other)
         others = list(set(others))
         others2id = map_elements_to_id(others)
         return remove_unrating_user_and_rename(self.dict_entity2id['user'],others2id,b_other) , others2id,len(others)    
