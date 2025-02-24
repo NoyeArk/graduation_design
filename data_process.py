@@ -20,7 +20,7 @@ class Data:
         # 将所有 ID 减 1
         self.users['UserID'] = self.users['UserID'] - 1
         self.movies['MovieID'] = self.movies['MovieID'] - 1
-        self.ratings['UserID'] = self.ratings['UserID'] - 1 
+        self.ratings['UserID'] = self.ratings['UserID'] - 1
         self.ratings['MovieID'] = self.ratings['MovieID'] - 1
 
         self.num_users = self.users['UserID'].max() + 1

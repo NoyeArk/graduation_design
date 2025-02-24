@@ -1,23 +1,28 @@
-# -*- coding: utf-8 -*-
-
-import toolz
 import argparse
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 
-from SeqEnsemble.GCNdata import Data
+from data_process import Data
 from Train_module import Train_basic
 
-import tensorflow.compat.v1 as tf
+NUM = 3
 tf.disable_v2_behavior()
 
-NUM = 3
 
-def parse_args(name,factor,seed,batch_size):
+def parse_args(name, factor, seed, batch_size):
+    """
+    解析命令行参数
+
+    Args:
+        name (`str`): 数据集名称
+        factor (`int`): 隐向量维度
+        seed (`int`): 随机种子
+        batch_size (`int`): 批量大小
+    """
     parser = argparse.ArgumentParser(description="Run .")
     parser.add_argument('--name', nargs='?', default= name )
     parser.add_argument('--model', nargs='?', default='ACF')
-    parser.add_argument('--path', nargs='?', default='/Users/mac/Desktop/graduation_design/old_datasets/processed/'+name,
+    parser.add_argument('--path', nargs='?', default='../old_datasets/processed/' + name,
                         help='Input data path.')
     parser.add_argument('--dataset', nargs='?', default=name,
                         help='Choose a dataset.')
@@ -290,7 +295,7 @@ class ACF(object):
 
 
 class Train(Train_basic):
-    def __init__(self,args,data):
+    def __init__(self, args,data):
         super(Train,self).__init__(args,data)
         self.item_attributes = self.collect_attributes()
         self.model = ACF(self.args,self.data, args.hidden_factor,args.lr, args.lamda, args.optimizer)
@@ -310,7 +315,7 @@ class Train(Train_basic):
         return samples
 
 
-def ACF_main(name, factor, seed, batch_size):
+def train_acf(name, factor, seed, batch_size):
     """
     主函数
 
@@ -320,8 +325,9 @@ def ACF_main(name, factor, seed, batch_size):
         seed (`int`): 随机种子
         batch_size (`int`): 批量大小
     """
-    # name, factor, Topk, seed ,batch_size = 'CiaoDVD',64,10,0,2048
+    # name, factor, Topk, seed, batch_size='CiaoDVD', 64, 10, 0, 2048
     args = parse_args(name, factor, seed, batch_size)
-    data = Data(args, seed)  # 获取数据
+    args.path = 'D:/Code/graduation_design/data/ml-25m/'
+    data = Data(args, seed)
     session_DHRec = Train(args, data)
     session_DHRec.train_attribute()

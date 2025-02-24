@@ -87,11 +87,11 @@ class Train_basic(object):
                     map_valid = np.sum(init_test_TopK_test)
                     self.meta_result = self.save_meta_result()
                 else:
-                    dir_name = "../datasets/%s/%s"%(basemodel,self.args.name)
-                    print([dir_name,os.path.isdir(dir_name)])
+                    dir_name = f"../datasets/{basemodel}/{self.args.name}"
+                    print([dir_name, os.path.isdir(dir_name)])
                     if not os.path.isdir(dir_name):
                         os.makedirs(dir_name)
-                    np.save("../datasets/%s/%s/%s.npy"%(basemodel,self.args.name,self.args.model),self.meta_result )
+                    np.save(f"../datasets/{basemodel}/{self.args.name}/{self.args.model}.npy", self.meta_result)
                     break
 
     def train_attribute(self):
@@ -146,19 +146,19 @@ class Train_basic(object):
             t2 = time()
 
             # evaluate training and validation datasets
-            if epoch % int(self.args.epoch/10) == 0:
+            if epoch % int(self.args.epoch / 10) == 0:
                 for topk in [10]:
-                    init_test_TopK_test = self.evaluate_TopK(self.data.test,topk) 
+                    init_test_TopK_test = self.evaluate_TopK(self.data.test_set, topk)
                     print("Epoch %d Top%d \t TEST SET:%.4f MAP:%.4f,NDCG:%.4f,PREC:%.4f;[%.1f s]\n"
-                      %(epoch,topk,0,init_test_TopK_test[0],init_test_TopK_test[1],init_test_TopK_test[2], time()-t2))
-                if MAP_valid < np.sum(init_test_TopK_test) and epoch<self.epoch:
+                      %(epoch,topk,0,init_test_TopK_test[0],init_test_TopK_test[1],init_test_TopK_test[2], time() - t2))
+                if MAP_valid < np.sum(init_test_TopK_test) and epoch < self.epoch:
                     MAP_valid = np.sum(init_test_TopK_test)
                     self.meta_result = self.save_meta_result()
                 else:
-                    dir_name = "../datasets/%s/%s"%(basemodel,self.args.name)
+                    dir_name = f"../datasets/{basemodel}/{self.args.name}"
                     if not os.path.isdir(dir_name):
                         os.makedirs(dir_name)
-                    np.save("../datasets/%s/%s/%s.npy"%(basemodel,self.args.name,self.args.model),self.meta_result )
+                    np.save(f"../datasets/{basemodel}/{self.args.name}/{self.args.model}.npy", self.meta_result)
                     break
 
     def save_meta_result(self):
