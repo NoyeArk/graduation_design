@@ -15,7 +15,7 @@ batch_size = 2048
 
 #'Kindle'!
 # for data in ['Instant_Video', 'Amazon_App', 'Kindle', 'Clothing', 'Games', 'Grocery']:
-for data in ['ml-25m']:
+for data in ['ml-1m']:
     # PFMC_main(data, factor, seed, batch_size, 5)
     # SASRec_main(data, factor, seed, batch_size)
     # Caser_main(data, factor, seed, batch_size)

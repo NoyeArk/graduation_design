@@ -3,3 +3,5 @@ basemodel/__pycache__/*
 data/*
 model/__pycache__/*
 old_datasets/*
+old_datasets.zip
+Reason4Rec/Data/Data_of_Reason4Rec.zip

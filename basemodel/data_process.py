@@ -101,8 +101,9 @@ class Data(object):
             'dianping': (['user', 'item', 'S', 'A', 'C'], [], ['S', 'A', 'C'], 20, 20),
             'Kindle': (['user', 'item', 'G'], [], ['G'], 50, 50),
             'tiktok': (['user', 'item', 'G'], [], ['G'], 50, 50),
-            'ml-25m': (['user', 'item', 'G'], [], ['G'], 10, 10, 'csv'),
-            'ml-10M100K': (['user', 'item', 'G'], [], ['G'], 10, 10, 'dat')
+            'ml-25m': (['user', 'item', 'G'], [], ['G'], 10, 10, '.csv'),
+            'ml-10M100K': (['user', 'item', 'G'], [], ['G'], 10, 10, '.dat'),
+            'ml-1m': (['user', 'item', 'G'], [], ['G'], 10, 10, '.dat')
         }
 
         if self.name in entity_config:
@@ -146,7 +147,7 @@ class Data(object):
         # 将物品侧实体转换为其他实体并设置它们的正向和反向字典
         for entity in self.item_side_entity:
             # item_data_name = 'I' + entity + '.data'
-            item_data_name = 'movies.csv'
+            item_data_name = 'movies' + self.data_suffix
 
             self.dict_list['item_' + entity], \
             self.dict_entity2id[entity], \
@@ -253,9 +254,9 @@ class Data(object):
         Returns:
             `tuple`: 返回用户物品交互列表、用户数量、物品数量、用户ID映射字典、物品ID映射字典
         """
-        if data_suffix == 'csv':
+        if data_suffix == '.csv':
             df = pd.read_csv(self.dir + 'ratings.csv')
-        elif data_suffix == 'dat':
+        elif data_suffix == '.dat':
             df = pd.read_csv(self.dir + 'ratings.dat', sep='::', names=['userId', 'movieId', 'rating', 'timestamp'])
         else:
             df = pd.read_csv(self.dir + 'ratings.data', sep='\t', header=None, nrows=leave_num)

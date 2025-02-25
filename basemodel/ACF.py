@@ -327,7 +327,7 @@ def train_acf(name, factor, seed, batch_size):
     """
     # name, factor, Topk, seed, batch_size='CiaoDVD', 64, 10, 0, 2048
     args = parse_args(name, factor, seed, batch_size)
-    args.path = 'D:/Code/graduation_design/data/ml-25m/'
+    args.path = 'D:/Code/graduation_design/data/ml-1m/'
     data = Data(args, seed)
     session_DHRec = Train(args, data)
     session_DHRec.train_attribute()
