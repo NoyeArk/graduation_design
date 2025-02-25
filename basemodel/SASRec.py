@@ -14,7 +14,7 @@ import argparse
 import copy
 from tqdm import tqdm 
 import scipy.sparse as sp
-from Train_module import Train_basic
+from basemodel.pipeline import Train_basic
 
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()

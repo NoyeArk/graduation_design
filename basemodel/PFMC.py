@@ -10,10 +10,11 @@ import numpy as np
 import tensorflow as tf
 
 from data_process import Data
-from Train_module import Train_basic
+from pipeline import Pipeline
 
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
+
 
 def parse_args(name, factor, seed, batch_size, n=5):
     """
@@ -217,7 +218,7 @@ class PFMC(object):
         return self.prediction
 
 
-class Train(Train_basic):
+class Train(Pipeline):
     """
     训练模型
     """

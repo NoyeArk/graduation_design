@@ -5,3 +5,7 @@ model/__pycache__/*
 old_datasets/*
 old_datasets.zip
 Reason4Rec/Data/Data_of_Reason4Rec.zip
+basemodel/model/__pycache__/ACF.cpython-310.pyc
+basemodel/model/__pycache__/FDSA.cpython-310.pyc
+datasets/basemodel_v/ml-1m/ACF.npy
+new_basemodel_result/basemodel_v/ml-1m/ACF.npy

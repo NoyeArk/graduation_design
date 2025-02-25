@@ -74,10 +74,10 @@ class Data(object):
     """
     def __init__(self, args, seed=0, Markov=False):
         self.name_id = dict()
-        self.name = args.dataset
-        self.dir = args.path if args.path[-1] == '/' else args.path + '/'
+        self.name = args['name']
+        self.dir = args['path'] if args['path'][-1] == '/' else args['path'] + '/'
 
-        if args.name in ['CiaoDVD', 'dianping']:
+        if args['name'] in ['CiaoDVD', 'dianping']:
             self.encoding = 'utf-8'
         else:
             self.encoding = 'iso-8859-15'
@@ -173,8 +173,8 @@ class Data(object):
                 self.dict_list['user_' + entity]
             )
 
-#       build sparse matrice of entity-entity
-        #user -item
+        # 构建实体-实体的稀疏矩阵
+        # user -item
         self.matrix = dict()
         self.matrix['user_item'] = build_sparse_matrix(self.entity_num['user'],self.entity_num['item'],self.dict_forward['train'])
         self.matrix['item_user'] = self.matrix['user_item'].transpose()
@@ -198,7 +198,7 @@ class Data(object):
             self.acou = self.pic_feature('acoustic.npy')
 
     def split_traintest(self, u_i, ratio=[0.6, 0.8]):
-        # 保持6:2:2和JMLR中的一致
+        # 保持 6:2:2 和 JMLR 中的一致
         user_count = Counter(u_i[:,0])  # count number of user's interaction
         train = []
         valid = []
@@ -257,7 +257,7 @@ class Data(object):
         if data_suffix == '.csv':
             df = pd.read_csv(self.dir + 'ratings.csv')
         elif data_suffix == '.dat':
-            df = pd.read_csv(self.dir + 'ratings.dat', sep='::', names=['userId', 'movieId', 'rating', 'timestamp'])
+            df = pd.read_csv(self.dir + 'ratings.dat', sep='::', names=['userId', 'movieId', 'rating', 'timestamp'], engine='python')
         else:
             df = pd.read_csv(self.dir + 'ratings.data', sep='\t', header=None, nrows=leave_num)
         df.columns = ['user','item','rating','time']
@@ -302,11 +302,11 @@ class Data(object):
         print(file_path)
 
         if file_path.endswith('.csv'):
-            items = pd.read_csv(file_path)
+            items = pd.read_csv(file_path, engine='python')
             item_entities = items.iloc[:, :2].values.tolist()  # 只取前两列
             item_entities = [[str(x), str(y)] for x, y in item_entities]
         elif file_path.endswith('.dat'):
-            items = pd.read_csv(file_path, sep='::', names=['movieId', 'title', 'genres'])
+            items = pd.read_csv(file_path, sep='::', names=['movieId', 'title', 'genres'], engine='python', encoding=self.encoding)
             item_entities = items.iloc[:, :2].values.tolist()  # 只取前两列
             item_entities = [[str(x), str(y)] for x, y in item_entities]
         else:

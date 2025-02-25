@@ -1,25 +1,56 @@
-# -*- coding: utf-8 -*-
+import yaml
+import numpy as np
 
-from ACF import train_acf
-from PFMC import PFMC_main
-from FDSA import FDSA_main
-from ANAM import ANAM_main
-from HARNN import HARNN_main
-from Caser import Caser_main
-from SASRec import SASRec_main
-
-seed = 0
-factor = 64
-batch_size = 2048
-# noise_len = 20
+from model.ACF import ACF
+from PFMC import PFMC
+from model.FDSA import FDSA
+from data_process import Data
+from pipeline import Pipeline
 
 #'Kindle'!
 # for data in ['Instant_Video', 'Amazon_App', 'Kindle', 'Clothing', 'Games', 'Grocery']:
-for data in ['ml-1m']:
-    # PFMC_main(data, factor, seed, batch_size, 5)
-    # SASRec_main(data, factor, seed, batch_size)
-    # Caser_main(data, factor, seed, batch_size)
-    # FDSA_main(data, factor, seed, batch_size)
-    train_acf(data, factor, seed, batch_size)
-    # HARNN_main(data, factor, seed, batch_size)
-    # ANAM_main(data, factor, seed, batch_size)
+
+class Train(Pipeline):
+    """
+    训练类
+    """
+    def __init__(self, args, data):
+        super(Train,self).__init__(args, data)
+        self.item_attributes = self.collect_attributes()
+
+        model_classes = {
+            'ACF': ACF,
+            'PFMC': PFMC,
+            'FDSA': FDSA
+        }
+        if args['model_name'] in model_classes:
+            self.model = model_classes[args['model_name']](
+                args,
+                data,
+                args['train']['factor'],
+                args['train']['lr'],
+                args['train']['lamda'],
+                args['train']['optimizer']
+            )
+
+    def sample_negative(self, data, num=10):
+        """
+        从所有的物品中进行随机采样作为负样本
+
+        Args:
+            data (`dict`): 数据
+            num (`int`): 采样数量
+
+        Returns:
+            samples (`np.ndarray`): 采样结果
+        """
+        samples = np.random.randint(0, self.n_item, size=len(data))
+        return samples
+
+
+if __name__ == '__main__':
+    with open('conig.yaml', 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    data = Data(config['dataset'], config['seed'])
+    pipeline = Train(config, data)
+    pipeline.train_attribute()

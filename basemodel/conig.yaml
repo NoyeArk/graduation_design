@@ -1,0 +1,15 @@
+seed: 0
+
+model_name: "FDSA"
+
+dataset:
+  name: "ml-1m"
+  path: "../data/ml-1m"
+
+train:
+  factor: 64
+  batch_size: 2048
+  epoch: 100
+  lr: 0.001
+  optimizer: "AdamOptimizer"
+  lamda: 0.0001
