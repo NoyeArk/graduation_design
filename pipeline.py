@@ -109,7 +109,10 @@ class Pipeline:
                 history_tensor = torch.LongTensor([items_list[:-1]])
 
                 # 获取推荐列表
-                recommended_items = self.model.recommend_next_k_items(user_tensor, history_tensor)[0]
+                recommended_items = self.model.recommend_next_k_items(
+                    user_tensor,
+                    history_tensor
+                )[0]
 
                 # 计算DCG
                 dcg = 0
