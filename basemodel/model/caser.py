@@ -1,49 +1,13 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Nov 14 20:31:32 2018
-
-@author: Yingpeng_Du
-"""
-
-from data_process import Data
 import toolz
 import numpy as np
-import tensorflow as tf
 from time import time
-import argparse
-import copy
 from tqdm import tqdm 
-import scipy.sparse as sp
-from basemodel.pipeline import Train_basic
-
 import tensorflow.compat.v1 as tf
+
+from pipeline import Pipeline
+
 tf.disable_v2_behavior()
 
-def parse_args(name,factor,Topk,seed,batch_size):
-    parser = argparse.ArgumentParser(description="Run .")  
-    parser.add_argument('--name', nargs='?', default= name )    
-    parser.add_argument('--model', nargs='?', default='Caser')
-    parser.add_argument('--path', nargs='?', default='../datasets/processed/'+name,
-                        help='Input data path.')
-    parser.add_argument('--dataset', nargs='?', default=name,
-                        help='Choose a dataset.')
-    parser.add_argument('--epoch', type=int, default=100,
-                        help='Number of epochs.')
-    parser.add_argument('--batch_size', type=int, default=batch_size,
-                        help='Batch size.')
-    parser.add_argument('--hidden_factor', type=int, default=factor,
-                        help='Number of hidden factors.')
-    parser.add_argument('--lamda', type=float, default = 1e-6,
-                        help='Regularizer for bilinear part.')
-    parser.add_argument('--keep', type=float, default=1.0, 
-                    help='Keep probility (1-dropout) for the bilinear interaction layer. 1: no dropout')
-    parser.add_argument('--lr', type=float, default=0.001,
-                        help='Learning rate.')
-    parser.add_argument('--optimizer', nargs='?', default='AdamOptimizer',
-                        help='Specify an optimizer type (AdamOptimizer, AdagradOptimizer, GradientDescentOptimizer, MomentumOptimizer).')
-    parser.add_argument('--Topk', type=int, default=Topk)
-    parser.add_argument('--seed', type=int, default=seed)  
-    return parser.parse_args()
 
 class Caser(object):
     def __init__(self, args, data, hidden_factor, learning_rate, lamda_bilinear, optimizer_type):
@@ -91,27 +55,29 @@ class Caser(object):
             # W2, b2 are encoded with nn.Embedding, as we don't need to compute scores for all items
             self.W2 = tf.Variable(initializer([self.num_items, self.dims+self.dims]))
             self.b2 = tf.Variable(initializer([self.num_items, 1]))
-            
+
             item_embs = tf.nn.embedding_lookup(self.item_embeddings, self.sequences)
             item_embs = tf.reshape(item_embs, [-1, self.L, self.dims, 1])
             user_emb = tf.nn.embedding_lookup(self.user_embeddings, self.users)
             user_emb = tf.reshape(user_emb, [-1, self.dims])
-            
+
             # vertical convolution layers
             if self.n_v:
-                out_v = tf.layers.conv2d(item_embs,
-                                         self.n_v,
-                                         [self.L, 1],
-                                         activation=tf.nn.relu)
+                out_v = tf.layers.conv2d(
+                    item_embs,
+                    self.n_v,
+                    [self.L, 1],
+                    activation=tf.nn.relu
+                )
                 out_v = tf.layers.flatten(out_v)
 
             # horizontal convolution layers
             out_hs = list()
             if self.n_h:
                 for h in self.lengths:
-                    conv_out = tf.layers.conv2d(item_embs, 
-                                                self.n_h, 
-                                                [h, self.dims], 
+                    conv_out = tf.layers.conv2d(item_embs,
+                                                self.n_h,
+                                                [h, self.dims],
                                                 activation=tf.nn.relu)
                     conv_out = tf.reshape(conv_out, [-1, self.L-h+1, self.n_h])
                     pool_out = tf.layers.max_pooling1d(conv_out, [self.L-h+1], 1)
@@ -182,11 +148,11 @@ class Caser(object):
         loss, opt = self.sess.run((self.loss, self.optimizer), feed_dict=feed_dict)
         return [loss]
     def pairwise_loss(self,inputx,labels):
-
         inputx_f = inputx[1:]
         inputx_f = tf.concat([inputx_f,tf.zeros([1,1])],axis=0)
         loss = -tf.reduce_sum(tf.log(tf.sigmoid((inputx-inputx_f)*labels)))
         return loss
+
     def pointwise_loss(self,inputx,labels):
         return tf.nn.l2_loss(inputx-labels)
     def cross_entropy_loss(self,inputx,labels):
@@ -201,25 +167,28 @@ class Caser(object):
         return self.prediction
 
 
-class Train(Train_basic):
-    def __init__(self,args,data):
-        super(Train,self).__init__(args,data)
+class CaserTrain(Pipeline):
+    """
+    Caser 模型训练类
+    """
+    def __init__(self, args, data):
+        super(CaserTrain, self).__init__(args,data)
         self.model = Caser(
             self.args,
             self.data,
-            args.hidden_factor,
-            args.lr,
-            args.lamda,
-            args.optimizer
+            args['train']['factor'],
+            args['train']['lr'],
+            args['lamda'][args['model']],
+            args['train']['optimizer']
         )
 
-    def train(self):  # fit a dataset
+    def train(self, use_item_attributes):
         MAP_valid = 0
         if self.include_valid == True:
-            train_data = np.array(self.data.train) # Array形式的二元组（user,item），none * 2
+            train_data = np.array(self.data.train_set) # Array形式的二元组（user,item），none * 2
             basemodel = 'basemodel_v'
         else:
-            train_data = np.array(self.data.train + self.data.valid) # Array形式的二元组（user,item），none * 2
+            train_data = np.array(self.data.train_set + self.data.train_set) # Array形式的二元组（user,item），none * 2
             basemodel = 'basemodel'
 
         for epoch in tqdm(range(0,self.epoch+1)): #每一次迭代训练
@@ -227,7 +196,7 @@ class Train(Train_basic):
 
             # sample负样本采样
             NG = 1  # NG 倍举例
-            NegSample = self.sample_negative(train_data, NG)#采样，none * NG
+            NegSample = self.sample_negative(train_data, NG)  # 采样，none * NG
             for user_chunk in toolz.partition_all(self.batch_size,[i for i in range(len(train_data))] ):                
                 chunk = list(user_chunk)
                 neg_chunk = np.array(NegSample[chunk],dtype = np.int64)[:,0]#none
@@ -243,23 +212,15 @@ class Train(Train_basic):
             t2 = time()
 
          # evaluate training and validation datasets
-            if epoch % int(self.args.epoch/10) == 0:
+            if epoch % int(self.args['train']['epoch']/10) == 0:
                 for topk in [10]:
-                    init_test_TopK_test = self.evaluate_TopK(self.data.test,topk) 
+                    init_test_TopK_test = self.evaluate_topk(self.data.test_set, topk)
                     print("Epoch %d Top%d \t TEST SET:%.4f MAP:%.4f,NDCG:%.4f,PREC:%.4f;[%.1f s]\n"
                       %(epoch,topk,0,init_test_TopK_test[0],init_test_TopK_test[1],init_test_TopK_test[2], time()-t2))
+
                 if MAP_valid < np.sum(init_test_TopK_test) and epoch<self.epoch:
                     MAP_valid = np.sum(init_test_TopK_test)
                     self.meta_result = self.save_meta_result()
                 else:
-                    
-                    np.save("../datasets/%s/%s/%s.npy"%(basemodel,self.args.name,self.args.model),self.meta_result )
-                    break      
-def Caser_main(name,factor,seed,batch_size):    
-
-#name,factor,Topk,seed ,batch_size = 'CiaoDVD',64,10,0,2056
-    args = parse_args(name,factor,0,seed,batch_size)
-    data = Data(args,seed)#获取数据
-    session_DHRec = Train(args,data)
-    session_DHRec.train()
-    # 
+                    np.save("D:/Code/graduation_design/datasets/%s/%s/%s.npy"%(basemodel,self.args['dataset']['name'],self.args['model']),self.meta_result )
+                    break

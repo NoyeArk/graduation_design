@@ -54,7 +54,7 @@ def main():
     np.random.seed(training_args.seed)
 
     model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name = args.model_path,
+        model = args.model_path,
         max_seq_length = max_seq_length,
         dtype = None,
         load_in_4bit = args.load_in_4bit,

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from data_process import Data
+from other.my_data import Data
 from model.baseline import NextKItemPredictor
 
 

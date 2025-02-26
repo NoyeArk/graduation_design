@@ -1,5 +1,5 @@
 import yaml
-from pipeline import Pipeline
+from other.train import Pipeline
 
 
 if __name__ == "__main__":

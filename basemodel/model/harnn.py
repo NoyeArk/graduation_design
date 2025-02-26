@@ -1,49 +1,11 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Nov 14 20:31:32 2018
-
-@author: Yingpeng_Du
-"""
-
-from data_process import Data
-import toolz
 import numpy as np
 import tensorflow as tf
-from time import time
-import argparse
-import copy
-from tqdm import tqdm 
-import scipy.sparse as sp
-from basemodel.pipeline import Train_basic
+from pipeline import Pipeline
 
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
 NUM = 3
-def parse_args(name,factor,seed,batch_size):
-        
-    parser = argparse.ArgumentParser(description="Run .")  
-    parser.add_argument('--name', nargs='?', default= name )    
-    parser.add_argument('--model', nargs='?', default='HARNN')
-    parser.add_argument('--path', nargs='?', default='../datasets/processed/'+name,
-                        help='Input data path.')
-    parser.add_argument('--dataset', nargs='?', default=name,
-                        help='Choose a dataset.')
-    parser.add_argument('--epoch', type=int, default=200,#ciaoDVD 600 #Amazon_App 200 ML&dianping 100
-                        help='Number of epochs.')
-    parser.add_argument('--batch_size', type=int, default=batch_size,
-                        help='Batch size.')
-    parser.add_argument('--hidden_factor', type=int, default=factor,
-                        help='Number of hidden factors.')
-    parser.add_argument('--lamda', type=float, default = 10e-4,
-                        help='Regularizer for bilinear part.')
-    parser.add_argument('--lr', type=float, default=0.001,
-                        help='Learning rate.')
-    parser.add_argument('--optimizer', nargs='?', default='AdamOptimizer',
-                        help='Specify an optimizer type (AdamOptimizer, AdagradOptimizer, GradientDescentOptimizer, MomentumOptimizer).')
-    parser.add_argument('--Topk', type=int, default=10)
-    parser.add_argument('--seed', type=int, default=seed)  
-    return parser.parse_args()
 
 class HARNN(object):
     def __init__(self,args,data,hidden_factor, learning_rate, lamda_bilinear, optimizer_type):
@@ -60,7 +22,7 @@ class HARNN(object):
         self.n_attribute = len(self.data.item_side_entity)
         self.n_slot = self.n_attribute + 1
         # init all variables in a tensorflow graph
-        np.random.seed(args.seed)
+        np.random.seed(args['seed'])
         self.num_a = np.sum([self.data.entity_num[key] for key in self.data.item_side_entity])
         self._init_graph()
 
@@ -77,8 +39,8 @@ class HARNN(object):
             self.neg_items = tf.placeholder(tf.int32, shape=[None, 5])
             self.feedback = tf.placeholder(tf.int32, shape=[None, 7])  # None * 2+ 5
             self.labels = tf.placeholder(tf.float32, shape=[None,1])# none 
-            self.all_attributes = tf.placeholder(tf.int32, shape=[self.n_item,self.n_attribute,NUM])
-            self.item_attribute = tf.reduce_mean(tf.nn.embedding_lookup(self.weights['attribute_embeddings'],self.all_attributes),axis=2)#[n_item,num_attri,k]
+            self.item_attributes = tf.placeholder(tf.int32, shape=[self.n_item,self.n_attribute,NUM])
+            self.item_attribute = tf.reduce_mean(tf.nn.embedding_lookup(self.weights['attribute_embeddings'],self.item_attributes),axis=2)#[n_item,num_attri,k]
 
             self.unified_item  = tf.reduce_sum(tf.concat([self.item_attribute,tf.expand_dims(self.weights['item_embeddings'],axis=1)],axis=1),axis=1)#[n_item,k]
 
@@ -158,7 +120,7 @@ class HARNN(object):
         feed_dict = {
             self.neg_items: np.random.randint(0, self.n_item, [len(data['feedback']), 5]),
             self.feedback: data['feedback'],
-            self.all_attributes: data['all_attributes']
+            self.item_attributes: data['item_attributes']
         }
         loss_rec,loss_reg, opt = self.sess.run((self.loss_rec,self.loss_reg, self.optimizer), feed_dict=feed_dict)
         return loss_rec,0.0,loss_reg
@@ -181,26 +143,25 @@ class HARNN(object):
         loss = -tf.reduce_sum(tf.log(tf.sigmoid((inputx-inputx_f)*labels)))
         return loss
         
-    def topk(self,user_item_feedback,all_attributes):
-        
-        feed_dict = {self.feedback: user_item_feedback,self.all_attributes:all_attributes}
+    def topk(self, user_item_feedback, item_attributes):
+        feed_dict = {self.feedback: user_item_feedback, self.item_attributes:item_attributes}
         _, self.prediction = self.sess.run(self.out_all_topk,feed_dict)     
         return self.prediction
 
 
-class Train(Train_basic):
-    def __init__(self,args,data):
-        super(Train,self).__init__(args,data)
+class HarnnTrain(Pipeline):
+    def __init__(self, args,data):
+        super(HarnnTrain, self).__init__(args,data)
         self.item_attributes = self.collect_attributes()
-        self.model = HARNN(self.args,self.data ,args.hidden_factor,args.lr, args.lamda, args.optimizer)
-    def sample_negative(self, data,num=10):
+        self.model = HARNN(
+            self.args,
+            self.data,
+            args['train']['factor'],
+            args['train']['lr'],
+            args['lamda'][args['model']],
+            args['train']['optimizer']
+        )
+
+    def sample_negative(self, data, num=10):
         samples = np.random.randint( 0,self.n_item,size = (len(data)))
         return samples
-
-def HARNN_main(name,factor,seed,batch_size):    
-#    name,factor,Topk,seed ,batch_size = 'CiaoDVD',64,10,0,2048
-    args = parse_args(name,factor,seed,batch_size)
-    data = Data(args,seed)#获取数据
-    session_DHRec = Train(args,data)
-    session_DHRec.train_attribute()
-    # 

@@ -100,11 +100,14 @@ class Data(object):
         self.name_id = dict()
         self.name = args.dataset
         self.dir = args.path if args.path[-1] == '/' else args.path + '/'
+
         if args.name in ['CiaoDVD', 'dianping']:
             self.encoding = 'utf-8'
         else:
             self.encoding= 'iso-8859-15'
+    
         self.epoch = 100
+
 #        if self.name in ['ML']:
 #            self.entity = ['user','item','G','A','C','D']#
 #            self.user_side_entity = []
@@ -115,7 +118,7 @@ class Data(object):
 #            self.user_side_entity = []
 #            self.item_side_entity = ['G']#'C'
 #            self.drop_user,self.drop_item = 3,3
-        if self.name in ['Amazon_App', 'Games', 'ml1m']:
+        if self.name in ['Amazon_App', 'Games', 'ml-1m']:
             self.entity = ['user','item','G']#'C',
             self.user_side_entity = []
             self.item_side_entity = ['G']#'C'
@@ -206,9 +209,10 @@ class Data(object):
 
         # 将物品-其他实体对转化为关系字典
         for entity in self.item_side_entity:
+            item_data_name = 'movies.dat'
             self.dict_list['item_' + entity], \
             self.dict_entity2id[entity], \
-            self.entity_num[entity] = self.get_item_entity_pairs('I' + entity + '.data')
+            self.entity_num[entity] = self.get_item_entity_pairs(item_data_name)   # 'I' + entity + '.data'
             self.dict_forward['item_' + entity] = create_relation_dict(
                 entity_count_1=self.entity_num['item'],
                 entity_count_2=self.entity_num[entity],
@@ -348,8 +352,8 @@ class Data(object):
             user2id (`dict`): 用户 ID 映射
             item2id (`dict`): 物品 ID 映射
         """
-        file_path = self.dir + 'ratings.data'
-        df = pd.read_csv(file_path, sep='\t', header=None, nrows=leave_num)
+        file_path = self.dir + 'ratings.dat'
+        df = pd.read_csv(file_path, sep='::', header=None, nrows=leave_num)
         df.columns = ['user', 'item', 'rating', 'time']
 
         # 按用户和时间排序
@@ -410,7 +414,7 @@ class Data(object):
 #                if self.name in ['ml100k']:
 #                    line = line.strip().split(',')
 #                if self.name in ['ML','tiktok' ,'CiaoDVD','Games','Amazon_App','dianping','Grocery','Kindle']:
-                line = line.strip().split('\t')
+                line = line.strip().split('::')
                 if len(line) != 2:
                     print(line)
                 b_other.append([str(line[0]), str(line[1])])

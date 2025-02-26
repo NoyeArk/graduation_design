@@ -14,7 +14,7 @@ tau = 0.1       # hyper-parameter
 max_sample_num = 10
 
 reward_model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name = f'reward_model_checkpoint_path_here', 
+    model = f'reward_model_checkpoint_path_here', 
     max_seq_length = 4096,
     dtype = None,
     load_in_4bit = True

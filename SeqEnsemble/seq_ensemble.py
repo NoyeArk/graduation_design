@@ -6,13 +6,13 @@ from tqdm import tqdm
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
-from SeqEnsemble.utils import *
-from SeqEnsemble.GCNdata import Data
+from utils import *
+from GCNdata import Data
 
 N = 100  # 这个N是为了取前多少个items的score，大于N的设为0.
 
 # 基模型
-base_models = ['ACF', 'FDSA', 'HARNN', 'Caser', 'PFMC', 'SASRec', 'ANAM']
+base_models = ['acf', 'fdsa', 'harnn', 'caser', 'pfmc', 'sasrec', 'anam']
 
 # 'ACF', 'FDSA', 'HARNN' 需要 attribute 信息，Caser', 'PFMC', 'SASRec' 仅依赖于序列信息。
 print_train = False  # 是否输出 train 上的验证结果（过拟合解释）。
@@ -22,7 +22,7 @@ def parse_args(name, factor, batch_size, tradeoff, user_module, model_module, di
     parser = argparse.ArgumentParser(description="Run .")
     parser.add_argument('--name', nargs='?', default= name)
     parser.add_argument('--model', nargs='?', default='SASEM')
-    parser.add_argument('--path', nargs='?', default='./datasets/processed/'+name,
+    parser.add_argument('--path', nargs='?', default='../data/'+name,
                         help='Input data path.')
     parser.add_argument('--dataset', nargs='?', default=name,
                         help='Choose a dataset.')
@@ -639,7 +639,7 @@ class MetaData(object):
         # 加载基础模型预测结果
         self.meta = []
         for base_model in base_models:
-            load = np.load(f"./datasets/basemodel/{self.args.name}/{base_model}.npy")
+            load = np.load(f"../datasets/basemodel_v/{self.args.name}/{base_model}.npy")
             self.meta.append(load)
         meta = np.stack(self.meta, axis=1)
 

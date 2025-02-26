@@ -1,5 +1,4 @@
-from SeqEnsemble.SeqEnsemble import SEM_main
-# from origin_seqensemble import SEM_main
+from seq_ensemble import SEM_main
 
 # 模型参数设置
 seed = 0
@@ -12,7 +11,8 @@ batch_size = {
     'Clothing': 2048,
     'Grocery': 2048,
     'Instant_Video': 256,
-    'Games': 1024
+    'Games': 1024,
+    'ml-1m': 1024
 }
 
 # 不同数据集的权重系数设置
@@ -22,7 +22,8 @@ tradeoff = {
     'Grocery': 128,
     'Kindle': 128,
     'Instant_Video': 2,
-    'Games': 32
+    'Games': 32,
+    'ml-1m': 2
 }
 
 # 不同数据集的训练轮数设置
@@ -32,7 +33,8 @@ epoch = {
     'Clothing': 10, 
     'Grocery': 20,
     'Instant_Video': 20,
-    'Games': 10
+    'Games': 10,
+    'ml-1m': 10
 }
 
 # 不同数据集的最大序列长度设置
@@ -42,7 +44,8 @@ maxlen = {
     'Clothing': 3,
     'Grocery': 5,
     'Instant_Video': 5,
-    'Games': 5
+    'Games': 5,
+    'ml-1m': 5
 }
 
 # 提出方法及其消融实验的设置说明
@@ -54,16 +57,16 @@ maxlen = {
 # w/o TPDiv: tradeoff[data], 'SAtt', 'dynamic', 'AEM-cov'
 
 # 运行示例
-data = 'Instant_Video'
+data = 'ml-1m'
 
 SEM_main(
     name=data,
     factor=factor,
     batch_size=batch_size[data],
     tradeoff=tradeoff[data],
-    user_module='enhanced',
-    model_module='enhanced',
-    div_module='enhanced',
+    user_module='SAtt',
+    model_module='dynamic',
+    div_module='cov',
     epoch=epoch[data],
     maxlen=maxlen[data]
 )

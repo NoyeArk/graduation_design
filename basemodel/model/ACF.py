@@ -2,6 +2,8 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
+from pipeline import Pipeline
+
 NUM = 3
 
 
@@ -255,3 +257,21 @@ class ACF(object):
         }
         _, self.prediction = self.sess.run(self.out_all_topk, feed_dict)
         return self.prediction
+
+
+class AcfTrain(Pipeline):
+    def __init__(self, args, data):
+        super(AcfTrain,self).__init__(args,data)
+        self.item_attributes = self.collect_attributes()
+        self.model = ACF(
+            self.args,
+            self.data,
+            args['train']['factor'],
+            args['train']['lr'],
+            args['lamda'][args['model']],
+            args['train']['optimizer']
+        )
+
+    def sample_negative(self, data, num=10):
+        samples = np.random.randint(0, self.n_item, size=len(data))
+        return samples

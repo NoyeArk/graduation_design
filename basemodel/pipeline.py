@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import os
 import copy
 import toolz
@@ -37,74 +35,15 @@ class Pipeline(object):
         """
         print(f"Epoch {epoch} - Loss: {loss:.4f}")
 
-    def train(self):
+    def train(self, use_item_attributes=False):
         """
         训练模型
+
+        Args:
+            use_item_attributes (`bool`): 是否使用物品属性
         """
-        # 检查初始性能，初始结果
-        map_valid = 0
-        if include_valid:
-            positive_samples = np.array(self.data.train)  # Array形式的二元组(user, item), none * 2
-            basemodel = 'basemodel_v'
-        else:
-            basemodel = 'basemodel'
-            positive_samples = np.array(self.data.train + self.data.valid)  # Array形式的二元组(user, item), none * 2
+        self.use_item_attributes = use_item_attributes
 
-        positive_samples_concat_last5 = np.concatenate(
-            [
-                positive_samples,
-                np.array([self.data.latest_interaction[(line[0], line[1])] for line in positive_samples])
-            ],
-            axis=1
-        )  # none * 2 + 5
-
-        for epoch in tqdm(range(0, self.epoch+1)):  # 每一次迭代训练
-            np.random.shuffle(positive_samples)
-            # sample负样本采样
-            negative_sample_num = 1  # NG倍举例
-            NegSample = self.sample_negative(positive_samples, negative_sample_num)  # 采样，none * NG
-
-            for user_chunk in toolz.partition_all(self.batch_size, [i for i in range(len(positive_samples))]):
-                chunk = list(user_chunk)
-                neg_chunk = np.array(NegSample[chunk], dtype=np.int64)[:,0]  # none*1
-                train_chunk_p5 = positive_samples_concat_last5[chunk]  # none*2+5
-                train_chunk_p5_copy = copy.deepcopy(train_chunk_p5)
-                train_chunk_p5_copy[:,1] = neg_chunk
-
-                feedback = np.stack([train_chunk_p5, train_chunk_p5_copy], axis=1)
-                feedback = np.reshape(feedback, [-1, 2 + 5])
-                labels = np.reshape(np.stack([np.ones(len(chunk)), np.zeros(len(chunk))], axis=1), [-1, 1])
-
-                # meta-path feature
-                self.feed_dict = {'feedback': feedback, 'labels': labels}
-                loss = self.model.partial_fit(self.feed_dict)
-                self.handle_loss(epoch, loss)
-
-            t2 = time()
-
-            # 评估训练和验证数据集
-            if epoch % int(self.args.epoch / 10) == 0:
-                for topk in [10]:
-                    init_test_TopK_test = self.evaluate_TopK(self.data.test, topk)
-                    print(
-                        "Epoch %d Top%d \t TEST SET:%.4f MAP:%.4f, NDCG:%.4f, PREC:%.4f;[%.1f s]\n"
-                        % (epoch, topk, 0, init_test_TopK_test[0], init_test_TopK_test[1], init_test_TopK_test[2], time() - t2)
-                    )
-                if map_valid < np.sum(init_test_TopK_test) and epoch<self.epoch:
-                    map_valid = np.sum(init_test_TopK_test)
-                    self.meta_result = self.save_meta_result()
-                else:
-                    dir_name = f"../datasets/{basemodel}/{self.args.name}"
-                    print([dir_name, os.path.isdir(dir_name)])
-                    if not os.path.isdir(dir_name):
-                        os.makedirs(dir_name)
-                    np.save(f"../datasets/{basemodel}/{self.args.name}/{self.args.model}.npy", self.meta_result)
-                    break
-
-    def train_attribute(self):
-        """
-        训练属性模型
-        """
         best_metric = 0
         if include_valid:
             positive_samples = np.array(self.data.train_set)  # Array 形式的二元组(user, item), none * 2
@@ -116,7 +55,7 @@ class Pipeline(object):
         positive_samples_concat_last5 = np.concatenate(
             [
                 positive_samples,
-                np.array([self.data.latest_interaction.get((line[0], line[1]), [0] * 5) 
+                np.array([self.data.latest_interaction.get((line[0], line[1]), [0] * 5)
                            for line in positive_samples])
             ],
             axis=1
@@ -147,17 +86,23 @@ class Pipeline(object):
                 )
 
                 # 模型输入特征
-                self.feed_dict = {
-                    'feedback': feedback,
-                    'labels': labels,
-                    'item_attributes': self.item_attributes
-                }
+                if use_item_attributes:
+                    self.feed_dict = {
+                        'feedback': feedback,
+                        'labels': labels,
+                        'item_attributes': self.item_attributes
+                    }
+                else:
+                    self.feed_dict = {
+                        'feedback': feedback,
+                        'labels': labels
+                    }
                 loss = self.model.partial_fit(self.feed_dict)
 
             t2 = time()
 
             # evaluate training and validation datasets
-            if epoch % int(self.args.epoch / 10) == 0:
+            if epoch % int(self.args['train']['epoch'] / 10) == 0:
                 for topk in [10]:
                     test_result = self.evaluate_topk(self.data.test_set, topk)
                     print(
@@ -169,10 +114,13 @@ class Pipeline(object):
                     best_metric = np.sum(test_result)
                     meta_result = self.save_meta_result()
                 else:
-                    dir_name = f"../datasets/{basemodel}/{self.args.name}"
+                    dir_name = f"../datasets/{basemodel}/{self.args['dataset']['name']}"
                     if not os.path.isdir(dir_name):
                         os.makedirs(dir_name)
-                    np.save(f"../datasets/{basemodel}/{self.args.name}/{self.args.model}.npy", meta_result)
+                    np.save(
+                        f"../datasets/{basemodel}/{self.args['dataset']['name']}/{self.args['model']}.npy", 
+                        meta_result
+                    )
                     break
 
     def save_meta_result(self):
@@ -303,5 +251,6 @@ class Pipeline(object):
                         continue
                     else:
                         n = n + 1
+
         print(np.sum(result_map))
         return [np.mean(result_map), np.mean(result_ndcg), np.mean(result_recall)]

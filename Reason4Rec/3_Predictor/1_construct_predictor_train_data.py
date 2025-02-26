@@ -12,7 +12,7 @@ data_df = pd.read_pickle(f'./Data/{dataset}/distilling_gpt_reasons.pkl')
 history_df = pd.read_pickle(f'./Data/{dataset}/train_summarizer_generation_results.pkl')
 
 reasoner, tokenizer = FastLanguageModel.from_pretrained(
-    model_name = f'reasoner_checkpoint_path_here', 
+    model = f'reasoner_checkpoint_path_here', 
     max_seq_length = 4096,
     dtype = None,
     load_in_4bit = True

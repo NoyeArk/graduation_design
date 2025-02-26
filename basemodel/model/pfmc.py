@@ -1,57 +1,9 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Nov 14 20:31:32 2018
-
-@author: Yingpeng_Du
-"""
-
-import argparse
 import numpy as np
-import tensorflow as tf
-
-from data_process import Data
-from pipeline import Pipeline
-
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
+from pipeline import Pipeline
 
-def parse_args(name, factor, seed, batch_size, n=5):
-    """
-    解析参数。
-
-    Args:
-        name (`str`): 数据集名称。
-        factor (`int`): 隐藏因子数量。
-        seed (`int`): 随机种子。
-        batch_size (`int`): 批量大小。
-        n (`int`): 邻居数量。
-
-    Returns:
-        args: 解析后的参数。
-    """
-    parser = argparse.ArgumentParser(description="Run .")  
-    parser.add_argument('--name', nargs='?', default= name )    
-    parser.add_argument('--model', nargs='?', default='PFMC')
-    parser.add_argument('--path', nargs='?', default='../datasets/processed/'+name,
-                        help='Input data path.')
-    parser.add_argument('--dataset', nargs='?', default=name,
-                        help='Choose a dataset.')
-    parser.add_argument('--batch_size', type=int, default=batch_size,
-                        help='Batch size.')
-    parser.add_argument('--hidden_factor', type=int, default=factor,
-                        help='Number of hidden factors.')
-    parser.add_argument('--lamda', type=float, default = 10e-5,
-                        help='Regularizer for bilinear part.')
-    parser.add_argument('--lr', type=float, default=0.001,
-                        help='Learning rate.')
-    parser.add_argument('--optimizer', nargs='?', default='AdamOptimizer',
-                        help='Specify an optimizer type (AdamOptimizer, AdagradOptimizer, GradientDescentOptimizer, MomentumOptimizer).')
-    parser.add_argument('--seed', type=int, default=seed) 
-    parser.add_argument('--n', type=int, default=n) 
-    parser.add_argument('--epoch', type=int, default=200,
-                        help='Number of epochs.')
-    return parser.parse_args()
 
 class PFMC(object):
     """
@@ -68,9 +20,8 @@ class PFMC(object):
         self.optimizer_type = optimizer_type
         self.loss_type = 'square_loss'
 
-        np.random.seed(args.seed)
+        np.random.seed(args['seed'])
 
-        # 初始化所有变量在 tensorflow 图中
         self._init_graph()
 
     def _init_graph(self):
@@ -83,27 +34,24 @@ class PFMC(object):
         with self.graph.as_default():  # , tf.device('/cpu:0'):
             # 输入数据，None * 2 + 5
             self.feedback = tf.placeholder(tf.int32, shape=[None, 7])
-
-            # 标签
             self.labels = tf.placeholder(tf.float32, shape=[None, 1])
 
-            # 初始化权重
             self.weights = self._initialize_weights()
 
             # 用户和物品的索引
-            self.users_idx = self.feedback[:,0]  # none
-            self.items_idx = self.feedback[:,1]  # none
-            self.users_p5_idx = self.feedback[:, 7 - self.args.n: 7] # none * 5
+            self.users_idx = self.feedback[:, 0]  # none
+            self.items_idx = self.feedback[:, 1]  # none
+            self.users_p5_idx = self.feedback[:, 7 - self.args['neighbor_cnt']: 7]  # none * 5
             self.l1_loss = []
 
             # 用户和物品的嵌入
-            self.UI = tf.nn.embedding_lookup(self.weights['UI'], self.users_idx)#none*k
-            self.IU = tf.nn.embedding_lookup(self.weights['IU'], self.items_idx)#none*k
+            self.UI = tf.nn.embedding_lookup(self.weights['UI'], self.users_idx)  # none*k
+            self.IU = tf.nn.embedding_lookup(self.weights['IU'], self.items_idx)  # none*k
             self.out1 = tf.reduce_sum(self.UI * self.IU, axis=1, keep_dims=True)
 
             print('self.users_p5_idx:', self.users_p5_idx)
             print('self.weights["IL"]:', self.weights['IL'].shape)
-            
+
             # 用户和物品的嵌入
             self.IL = tf.reduce_mean(tf.nn.embedding_lookup(self.weights['IL'], self.users_p5_idx), axis=1)  # none*k
             self.LI = tf.nn.embedding_lookup(self.weights['LI'], self.items_idx)#none*k
@@ -112,16 +60,16 @@ class PFMC(object):
             # 用户和物品的嵌入
             # self.UL = tf.nn.embedding_lookup(self.weights['UI'],self.users_idx)#none*k
             # self.LU = tf.reduce_mean(tf.nn.embedding_lookup(self.weights['LU'],self.users_p5_idx),axis=1)#none*k
-            
+
             self.out = self.out1 + self.out2  # none * 1            
             self.loss_rec = self.pairwise_loss(self.out,self.labels)
             # self.loss_l1 = tf.reduce_sum(tf.stack(self.l1_loss))tf.Variable(0,dtype=tf.float32)
 
             self.loss_reg = 0
             for wgt in tf.trainable_variables():
-                self.loss_reg +=self.args.lamda* tf.nn.l2_loss(wgt)
-            self.loss = self.loss_rec +self.loss_reg
-            
+                self.loss_reg += self.args['lamda'][self.args['model']] * tf.nn.l2_loss(wgt)
+            self.loss = self.loss_rec + self.loss_reg
+
             # Optimizer
             if self.optimizer_type == 'AdamOptimizer':
                 self.optimizer = tf.train.AdamOptimizer(
@@ -196,7 +144,10 @@ class PFMC(object):
             loss_rec (`float`): 正样本的损失。
             loss_reg (`float`): 正则化损失。
         """
-        feed_dict = {self.feedback: data['feedback'], self.labels: data['labels']}
+        feed_dict = {
+            self.feedback: data['feedback'],
+            self.labels: data['labels']
+        }
         loss_rec, loss_reg, opt = self.sess.run(
             (self.loss_rec, self.loss_reg, self.optimizer),
             feed_dict=feed_dict
@@ -212,46 +163,33 @@ class PFMC(object):
         loss = -tf.reduce_sum(tf.log(tf.sigmoid((inputx-inputx_f)*labels)))
         return loss
 
-    def topk(self,user_item_feedback):
+    def topk(self, user_item_feedback):
+        """
+        获取 topk 预测
+
+        Args:
+            user_item_feedback (`np.ndarray`): 用户和物品的反馈
+
+        Returns:
+            prediction (`np.ndarray`): 预测结果
+        """
         feed_dict = {self.feedback: user_item_feedback}
         _, self.prediction = self.sess.run(self.out_all_topk,feed_dict)
         return self.prediction
 
 
-class Train(Pipeline):
-    """
-    训练模型
-    """
+class PfmcTrain(Pipeline):
     def __init__(self, args, data):
-        super(Train, self).__init__(args, data)
+        super(PfmcTrain, self).__init__(args, data)
         self.model = PFMC(
             self.args,
             self.data,
-            args.hidden_factor,
-            args.lr,
-            args.lamda,
-            args.optimizer
+            args['train']['factor'],
+            args['train']['lr'],
+            args['lamda'][args['model']],
+            args['train']['optimizer']
         )
 
-
-def PFMC_main(name, factor, seed, batch_size, keep):
-    """
-    主函数
-
-    Args:
-        name (`str`): 数据集名称。
-        factor (`int`): 隐藏因子数量。
-        seed (`int`): 随机种子。
-        batch_size (`int`): 批量大小。
-        keep (`int`): 保留的邻居数量。
-    """
-    args = parse_args(name, factor, seed, batch_size, keep)
-
-    # 获取数据
-    data = Data(args, seed)
-
-    # 创建模型
-    session_DHRec = Train(args, data)
-
-    # 训练模型
-    session_DHRec.train()
+    def sample_negative(self, data, num=10):
+        samples = np.random.randint(0, self.n_item, size=len(data))
+        return samples

@@ -1,25 +1,44 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Nov 14 20:31:32 2018
-
-@author: Yingpeng_Du
-"""
-
-from data_process import Data
 import toolz
 import numpy as np
 import tensorflow as tf
 from time import time
 import argparse
-import copy
 from tqdm import tqdm 
-import scipy.sparse as sp
-from basemodel.pipeline import Train_basic
+from pipeline import Pipeline
 
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
 reuse = True
+
+
+def parse_args(name, factor, seed, batch_size):
+    parser = argparse.ArgumentParser(description="Run .")  
+    parser.add_argument('--name', nargs='?', default= name )    
+    parser.add_argument('--model', nargs='?', default='SASRec')
+    parser.add_argument('--path', nargs='?', default='../datasets/processed/'+name,
+                        help='Input data path.')
+    parser.add_argument('--dataset', nargs='?', default=name,
+                        help='Choose a dataset.')
+    parser.add_argument('--batch_size', type=int, default=batch_size,
+                        help='Batch size.')
+    parser.add_argument('--hidden_factor', type=int, default=factor,
+                        help='Number of hidden factors.')
+    parser.add_argument('--l2_emb', type=float, default = 10e-5,
+                        help='Regularizer for bilinear part.')
+    parser.add_argument('--lr', type=float, default=0.001,
+                        help='Learning rate.')
+    parser.add_argument('--optimizer', nargs='?', default='AdamOptimizer',
+                        help='Specify an optimizer type (AdamOptimizer, AdagradOptimizer, GradientDescentOptimizer, MomentumOptimizer).')
+    parser.add_argument('--Topk', type=int, default=10)
+    parser.add_argument('--maxlen', type=int, default=5)  
+    parser.add_argument('--dropout_rate', type=float, default=0.5)  
+    parser.add_argument('--num_blocks', default=1, type=int)
+    parser.add_argument('--num_heads', default=1, type=int)
+    parser.add_argument('--epoch', type=int, default=400,
+                        help='Number of epochs.')
+        
+    return parser.parse_args()
 
 
 def positional_encoding(dim, sentence_length, dtype=tf.float32):
@@ -280,9 +299,7 @@ def feedforward(inputs,
     return outputs
 
 NUM = 1
-def parse_args(name,factor,seed,batch_size):
-
-    
+def parse_args(name, factor, seed, batch_size):
     parser = argparse.ArgumentParser(description="Run .")  
     parser.add_argument('--name', nargs='?', default= name )    
     parser.add_argument('--model', nargs='?', default='SASRec')
@@ -446,21 +463,30 @@ class SASREC(object):
         return tf.Session(config=config)
 
 
-class Train(Train_basic):
-    def __init__(self, args, data, model):
-        super(Train,self).__init__(args, data)
-        self.model = SASREC(self.n_user, self.n_item, self.args)
+class SasrecTrain(Pipeline):
+    def __init__(self, args, data):
+        args = parse_args(
+            args['dataset']['name'],
+            args['train']['factor'],
+            args['seed'],
+            args['train']['batch_size']
+        )
 
-    def train(self):  # fit a dataset
-    # Check Init performance
-    #初始结果
+        super(SasrecTrain, self).__init__(args, data)
+        self.model = SASREC(
+            self.n_user,
+            self.n_item,
+            self.args
+        )
+
+    def train(self, use_item_attributes=False):
         MAP_valid = 0
         if self.include_valid == True:
-            PosSample = np.array(self.data.train) # Array形式的二元组（user,item），none * 2
+            PosSample = np.array(self.data.train_set) # Array形式的二元组（user,item），none * 2
             basemodel = 'basemodel_v'
         else:
             basemodel = 'basemodel'
-            PosSample = np.array(self.data.train + self.data.valid) # Array形式的二元组（user,item），none * 2
+            PosSample = np.array(self.data.train_set + self.data.valid_set) # Array形式的二元组（user,item），none * 2
 
         PosSample_with_p5 = np.concatenate([PosSample,np.array([\
                     self.data.latest_interaction[(line[0],line[1])] for line in PosSample])],axis =1)#none*2+5
@@ -472,12 +498,12 @@ class Train(Train_basic):
                 chunk = list(user_chunk)
                 sample_chunk = PosSample_with_p5[chunk]
 
-                u = sample_chunk[:,1] 
-                seq = sample_chunk[:,2:] 
+                u = sample_chunk[:,1]
+                seq = sample_chunk[:,2:]
                 seq[seq==-1]=0
-                pos = sample_chunk[:,1:6] 
+                pos = sample_chunk[:,1:6]
                 pos[pos==-1]=0
-                neg = self.sample_negative(pos) 
+                neg = self.sample_negative(pos)
 
                 # meta-path feature
                 self.feed_dict = {'u':u,'seq':seq,'pos':pos,'neg':neg}
@@ -487,24 +513,17 @@ class Train(Train_basic):
          # evaluate training and validation datasets
             if epoch % int(self.args.epoch/10) == 0:
                 for topk in [10]:
-                    init_test_TopK_test = self.evaluate_TopK(self.data.test,topk) 
+                    init_test_TopK_test = self.evaluate_topk(self.data.test_set, topk)
                     print("Epoch %d Top%d \t TEST SET:%.4f MAP:%.4f,NDCG:%.4f,PREC:%.4f;[%.1f s]\n"
                       %(epoch,topk,0,init_test_TopK_test[0],init_test_TopK_test[1],init_test_TopK_test[2], time()-t2))
-                if MAP_valid < np.sum(init_test_TopK_test) and epoch<self.epoch:
+
+                if MAP_valid < np.sum(init_test_TopK_test) and epoch < self.epoch:
                     MAP_valid = np.sum(init_test_TopK_test)
                     self.meta_result = self.save_meta_result()
                 else:
                     np.save("../datasets/%s/%s/%s.npy"%(basemodel, self.args.name, self.args.model), self.meta_result)
                     break
 
-    def sample_negative(self, data,num=10):
-        samples = np.random.randint( 0,self.n_item,size = np.shape(data))
+    def sample_negative(self, data, num=10):
+        samples = np.random.randint(0, self.n_item, size=np.shape(data))
         return samples
-
-
-def SASRec_main(name, factor, seed, batch_size):
-    # name,factor,Topk,seed ,batch_size = 'Amazon_App',128,10,0,2048
-    args = parse_args(name,factor,seed,batch_size)
-    data = Data(args, seed)  # 获取数据
-    session_DHRec = Train(args, data, SASREC)
-    session_DHRec.train()

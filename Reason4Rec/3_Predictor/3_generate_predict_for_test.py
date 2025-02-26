@@ -11,7 +11,7 @@ data_df = pd.read_pickle(f'./Data/{dataset}/reason_for_test_by_reasoner.pkl')
 history_df = pd.read_pickle(f'./Data/{dataset}/train_summarizer_generation_results.pkl')
 
 predictor, tokenizer = FastLanguageModel.from_pretrained(
-    model_name = f'predictor_checkpoint_path_here', 
+    model = f'predictor_checkpoint_path_here', 
     max_seq_length = 4096,
     dtype = None,
     load_in_4bit = True

@@ -77,7 +77,7 @@ class Data(object):
         self.name = args['name']
         self.dir = args['path'] if args['path'][-1] == '/' else args['path'] + '/'
 
-        if args['name'] in ['CiaoDVD', 'dianping']:
+        if self.name in ['CiaoDVD', 'dianping']:
             self.encoding = 'utf-8'
         else:
             self.encoding = 'iso-8859-15'
