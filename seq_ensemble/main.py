@@ -64,7 +64,7 @@ SEM_main(
     factor=factor,
     batch_size=batch_size[data],
     tradeoff=tradeoff[data],
-    user_module='SAtt',
+    user_module='DIEN',
     model_module='dynamic',
     div_module='cov',
     epoch=epoch[data],

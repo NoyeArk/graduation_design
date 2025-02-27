@@ -121,6 +121,7 @@ class Data(object):
         # 移除交互次数少于5的用户和物品
         self.dict_list['user_item'], self.entity_num['user'], self.entity_num['item'],\
         self.dict_entity2id['user'], self.dict_entity2id['item'] = self._load_rating(remove_rating, self.drop_user, self.drop_item, self.data_suffix)
+
         self.latest_interaction = self.find_latest_interaction(self.dict_list['user_item'])  # 时间特征
 
         self.train_set, self.valid_set, self.test_set = self.split_traintest(self.dict_list['user_item'])
@@ -241,14 +242,14 @@ class Data(object):
 
         return result
 
-    def _load_rating(self, score, remove_less_than1, remove_less_than2, data_suffix):
+    def _load_rating(self, rating_threshold, user_threshold, item_threshold, data_suffix):
         """
         获取评分数据
 
         Args:
-            score (`float`): 评分阈值
-            remove_less_than1 (`int`): 用户交互数阈值
-            remove_less_than2 (`int`): 物品交互数阈值
+            rating_threshold (`float`): 评分阈值
+            user_threshold (`int`): 用户交互数阈值
+            item_threshold (`int`): 物品交互数阈值
             data_suffix (`str`): 数据文件后缀
 
         Returns:
@@ -261,31 +262,36 @@ class Data(object):
         else:
             df = pd.read_csv(self.dir + 'ratings.data', sep='\t', header=None, nrows=leave_num)
         df.columns = ['user','item','rating','time']
+
         df = df.sort_values(['user','time'])  # sort for user and time
 
         # 删除评分小于 score 的交互
-        df = df[df['rating'] > score]
+        df = df[df['rating'] > rating_threshold]
 
         # 获取用户物品交互列表
-        u_i = df[['user','item']].values.tolist()
-        u_i = [list(map(str,line)) for line in u_i]
+        user_item = df[['user','item']].values.tolist()
+        user_item = [list(map(str, line)) for line in user_item]
 
-        us,bs = zip(*u_i)
-        us_list = []
-        bs_list = []
-        C_us = Counter(us)
-        for u in C_us.keys():
-            if C_us[u]>=remove_less_than1:
-                us_list.append(u)
-        C_bs = Counter(bs)
-        for b in C_bs.keys():
-            if C_bs[b]>=remove_less_than2:
-                bs_list.append(b)
-        num_user, num_item = len(us_list), len(bs_list)
-        user2id, item2id = reverse_and_map(us_list), reverse_and_map(bs_list)
+        users, items = zip(*user_item)
+        user_list = []
+        item_list = []
+
+        users_cnt = Counter(users)
+        for user, count in users_cnt.items():
+            if count >= user_threshold:
+                user_list.append(user)
+
+        items_cnt = Counter(items)
+        for item, count in items_cnt.items():
+            if count >= item_threshold:
+                item_list.append(item)
+
+        num_user, num_item = len(user_list), len(item_list)
+
+        user2id, item2id = reverse_and_map(user_list), reverse_and_map(item_list)
         self.name_id['item'] = item2id
 
-        return np.array(remove_unrating_user_and_rename(user2id,item2id, u_i)),num_user, num_item,user2id, item2id
+        return np.array(remove_unrating_user_and_rename(user2id,item2id, user_item)),num_user, num_item,user2id, item2id
 
     def _load_item_side_entities(self, subdir):
         """

@@ -7,7 +7,7 @@ from collections import Counter
 from scipy.sparse import csr_matrix, coo_matrix, lil_matrix, save_npz
 
 leave_num = 1000000000
-remove_rating = 3.5
+remove_rating = 2
 last = 10  # 5 for BMS; 10 for SNR
 
 
@@ -172,7 +172,6 @@ class Data(object):
         )  # 53
 
         # 获取每个用户最近的交互记录
-
         try:
             self.latest_interaction = self.get_latest_interaction(
                 user_item_pairs=self.dict_list['user_item'],
@@ -317,11 +316,13 @@ class Data(object):
             dict: { (user, item): [最近的交互记录] }
         """
         result = dict()
-        init = [-1 for i in range(keep)]
+        init = [-1 for _ in range(keep)]
         latest = copy.deepcopy(init)
 
         # 遍历用户-物品对
         for i, (user, item) in enumerate(user_item_pairs):
+            if user == 1 and item == 112:
+                print('--------------------------------')
             result[(user, item)] = copy.deepcopy(list(latest[-keep:]))
             if i < len(user_item_pairs) - 1:
                 if user_item_pairs[i + 1][0] != user:
@@ -344,7 +345,7 @@ class Data(object):
             user_threshold (`int`): 用户评分阈值
             item_threshold (`int`): 物品评分阈值
             keep_interaction (`int`): 保留的交互次数
-        
+
         Returns:
             user_item (`list`): 用户-物品对
             num_user (`int`): 用户数量

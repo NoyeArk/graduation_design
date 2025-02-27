@@ -84,16 +84,16 @@ class Caser(object):
                     pool_out = tf.squeeze(pool_out, 1)
                     out_hs.append(pool_out)
                 out_h = tf.concat(out_hs, 1)
-                
-            # concat two convolution layers    
+
+            # concat two convolution layers
             out = tf.concat([out_v, out_h], 1)
-            
+
             # fully-connected layer
             z = tf.layers.dense(out, self.dims, activation=tf.nn.relu)
             z = tf.layers.dropout(z, self.drop_ratio, self.is_training)
             x = tf.concat([z, user_emb], 1)
             x = tf.reshape(x, [-1, 1, 2*self.dims])
-            
+
             w2 = tf.nn.embedding_lookup(self.W2, self.items)
             b2 = tf.nn.embedding_lookup(self.b2, self.items)
             b2 = tf.squeeze(b2, 2)

@@ -22,7 +22,7 @@ def parse_args(name, factor, batch_size, tradeoff, user_module, model_module, di
     parser = argparse.ArgumentParser(description="Run .")
     parser.add_argument('--name', nargs='?', default= name)
     parser.add_argument('--model', nargs='?', default='SASEM')
-    parser.add_argument('--path', nargs='?', default='../data/'+name,
+    parser.add_argument('--path', nargs='?', default='D:/Code/graduation_design/data/'+name,
                         help='Input data path.')
     parser.add_argument('--dataset', nargs='?', default=name,
                         help='Choose a dataset.')
@@ -208,11 +208,19 @@ class Model(object):
             if self.args.div_module == 'AEM-cov':
                 # AEM diversity
                 self.model_emb =  self.basemodel_emb#[none,k,p]
-                cov_idx = tf.constant(1-np.expand_dims(np.diag(np.ones(self.n_base_model)),axis=0),dtype=tf.float32)#[none,k,k]    
-                cov_div1 = tf.square(tf.reduce_sum(tf.expand_dims(self.model_emb,axis=1)*tf.expand_dims(self.model_emb,axis=2),axis=-1))
-                l2 = tf.reduce_sum(self.model_emb **2,axis=-1)#none* k
-                cov_div2 = tf.matmul(tf.expand_dims(l2,axis=-1),tf.expand_dims(l2,axis=1))#none* k *k
-                self.cov = cov_div1 / cov_div2  #[none, k, k]
+                cov_idx = tf.constant(
+                    1 - np.expand_dims(np.diag(np.ones(self.n_base_model)), axis=0),
+                    dtype=tf.float32
+                )  # [none, k, k]    
+                cov_div1 = tf.square(
+                    tf.reduce_sum(
+                        tf.expand_dims(self.model_emb, axis=1) * tf.expand_dims(self.model_emb,axis=2),
+                        axis=-1
+                    )
+                )
+                l2 = tf.reduce_sum(self.model_emb ** 2, axis=-1)  # none * k
+                cov_div2 = tf.matmul(tf.expand_dims(l2, axis=-1), tf.expand_dims(l2, axis=1))  # none* k *k
+                self.cov = cov_div1 / cov_div2  # [none, k, k]
             elif self.args.div_module == 'cov':
                 self.model_emb =  self.basemodel_emb#[none,k,p]
                 cov_wgt = tf.stop_gradient(
@@ -369,7 +377,7 @@ class Model(object):
                     dtype=tf.float32
                 )
 
-            # 2. 兴趣演化层 - 使用带注意力机制的GRU建模兴趣演化
+            # 2. 兴趣演化层 - 使用带注意力机制的 GRU 建模兴趣演化
             with tf.variable_scope("interest_evolution"):
                 # 注意力权重计算
                 att_weights = tf.layers.dense(
@@ -459,9 +467,11 @@ class Model(object):
             self.seq += t
 
             # Dropout
-            self.seq = tf.layers.dropout(self.seq,
-                                         rate=0.5,
-                                         training=tf.convert_to_tensor(self.is_training))
+            self.seq = tf.layers.dropout(
+                self.seq,
+                rate=0.5,
+                training=tf.convert_to_tensor(self.is_training)
+            )
             self.seq *= mask
 
             # Build blocks
@@ -571,7 +581,7 @@ class Model(object):
         Returns:
             loss (`tf.Tensor`): 正负样本损失
         """
-        return -tf.reduce_sum(tf.sigmoid((postive - negative)))
+        return -tf.reduce_mean(tf.sigmoid((postive - negative)))
 
     def topk(self, user_item_pairs, last_interaction, items_score, base_focus):
         """
@@ -639,11 +649,11 @@ class MetaData(object):
         # 加载基础模型预测结果
         self.meta = []
         for base_model in base_models:
-            load = np.load(f"../datasets/basemodel_v/{self.args.name}/{base_model}.npy")
+            load = np.load(f"D:/Code/graduation_design/datasets/basemodel_v/{self.args.name}/{base_model}.npy")
             self.meta.append(load)
         meta = np.stack(self.meta, axis=1)
 
-        # meta_XXXX 表示 [user, item, ranking(500)]
+        # meta_XXXX 表示 [user, item, ranking(102)]
         self.train_meta = meta[[
             self.user_item_pairs_to_index[line[0], line[1]]
             for line in self.data.valid_set
@@ -701,27 +711,37 @@ class MetaData(object):
             rank_chunk_k = rank_chunk[:, k, :]
             # 比较真实物品是否在排名中
             is_item_in_rank = gt_item == rank_chunk_k
-            # 如果物品在排名中，计算得分 = 1/(10 + 物品的排名位置)
+            # 如果物品在排名中，计算得分 = 1 / (10 + 物品的排名位置)
             label[np.sum(is_item_in_rank, axis=1) > 0, k] = 1 / (10 + np.argwhere(is_item_in_rank)[:, 1])
 
         # 返回用户-物品对和对应的得分
         return self.train_meta[:, 0, :2], label
 
-    def label_negative(self,neglist, NG):#neglist is 1-d list where each element denotes the negative item
-        #返回负样本得分的函数
+    def label_negative(self, neglist, NG):  # neglist 是一个一维列表，其中每个元素表示负样本物品
+        """
+        返回负样本得分的函数
+
+        Args:
+            neglist (`np.ndarray`): 负样本列表
+            NG (`int`): 负样本数量
+
+        Returns:
+            label (`np.ndarray`): 负样本得分
+        """
         n_k = len(base_models)
-        assert len(neglist)==len(self.train_meta), 'wrong size'
+        assert len(neglist) == len(self.train_meta), 'wrong size'
+
         label = []
         for i in range(NG):
-            label_i = np.zeros([len(self.train_meta),n_k])
+            label_i = np.zeros([len(self.train_meta), n_k])
             GT_item = np.expand_dims(neglist[:,i],axis=1)#[batch,1] #for item
             rank_chunk = copy.deepcopy(self.train_meta[:,:,2:2+N]) #[batch,k,rank]       
             for k in range(n_k):
-                rank_chunk_k = rank_chunk[:,k,:]
+                rank_chunk_k = rank_chunk[:, k, :]
                 torf = GT_item == rank_chunk_k
                 label_i[np.sum(torf,axis=1)>0,k] = 1 / (10+ np.argwhere(torf)[:,1])
             label.append(label_i)
-        return np.stack(label,axis=1)
+        return np.stack(label, axis=1)
 
 
 class Train_MF(object):
@@ -767,11 +787,8 @@ class Train_MF(object):
             # 用户-物品对
             user_item_pairs = self.meta_data.user_item_pairs  # none * 2
 
-            # 用户
             self.users = user_item_pairs[:, 0]
-            # 时间戳
             self.times = self.timestamp()
-            # 正采样
             self.items = user_item_pairs[:, 1]
 
             # 采样，none * NG
@@ -802,26 +819,17 @@ class Train_MF(object):
                 p = p + 1
                 chunk = shuffle[list(user_chunk)]
 
-                # 用户
                 u_chunk = self.users[chunk]  # none
-
-                # 序列
                 seq_chunk = self.seq[chunk]  # none * p
-
-                # 正样本
                 i_pos_chunk = self.items[chunk]  # none
-
-                # 负样本
                 i_neg_chunk = self.negative_samples[chunk]  # none * NG
 
                 # 正负样本标签
-                meta_positive_chunk = meta_positive[chunk]  # none *k
-                meta_negative_chunck = meta_negative[chunk]  # none * NG *k
+                meta_positive_chunk = meta_positive[chunk]  # none * k
+                meta_negative_chunck = meta_negative[chunk]  # none * NG * k
 
                 # 基模型表示
                 base_focus_chunck = base_focus[chunk]
-
-                # 时间戳
                 times = self.times[chunk]
 
                 self.feed_dict = {

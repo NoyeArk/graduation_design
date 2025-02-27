@@ -12,7 +12,7 @@ from model.sasrec import SasrecTrain
 # for data in ['Instant_Video', 'Amazon_App', 'Kindle', 'Clothing', 'Games', 'Grocery']:
 
 if __name__ == '__main__':
-    with open('conig.yaml', 'r', encoding='utf-8') as f:
+    with open('config.yaml', 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     data = Data(config['dataset'], config['seed'])
 
