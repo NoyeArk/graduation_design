@@ -150,7 +150,7 @@ class Model(object):
                 self.preference = self.state[:, -1, :] + self.user_embed  # [none,d]
                 self.items_embs = self.item_emb_table
             elif self.args.user_module == 'DIEN':
-                self.state = self.dien(self.input_seq)
+                self.state = self.dien_with_self_attention(self.input_seq)
                 self.preference = self.state[:,-1,:] + self.user_embed  # [none,d]
                 self.items_embs = self.item_emb_table
             elif self.args.user_module == 'static':
@@ -181,9 +181,6 @@ class Model(object):
             elif self.args.model_module == 'static':
                 self.basemodel_emb = self.weights['base_model_embeddings']  # [1, k, d]
 
-            # 添加 MOE 模块
-            # self.basemodel_emb = self.moe(self.basemodel_emb)
-
             # 计算每个基模型的权重
             self.wgts_org = tf.reduce_sum(
                 tf.expand_dims(self.preference, axis=1) * self.basemodel_emb,
@@ -211,7 +208,7 @@ class Model(object):
                 cov_idx = tf.constant(
                     1 - np.expand_dims(np.diag(np.ones(self.n_base_model)), axis=0),
                     dtype=tf.float32
-                )  # [none, k, k]    
+                )  # [none, k, k]
                 cov_div1 = tf.square(
                     tf.reduce_sum(
                         tf.expand_dims(self.model_emb, axis=1) * tf.expand_dims(self.model_emb,axis=2),
@@ -331,20 +328,20 @@ class Model(object):
 
         return final_outputs
 
-    def dien(self, input_seq):
+    def dien_with_self_attention(self, input_seq):
         """
-        计算DIEN(Deep Interest Evolution Network)的输出。
+        计算增强版DIEN(Deep Interest Evolution Network)的输出，增加了自注意力机制。
         
         Args:
             input_seq (`tf.Tensor`): 输入序列 [batch_size, seq_len]
 
         Returns:
-            seq_emb (`tf.Tensor`): DIEN的输出 [batch_size, seq_len, hidden_factor]
+            seq_emb (`tf.Tensor`): 增强版DIEN的输出 [batch_size, seq_len, hidden_factor]
         """
         mask = tf.expand_dims(tf.to_float(tf.not_equal(input_seq, -1)), -1)
         reuse = tf.AUTO_REUSE
 
-        with tf.variable_scope("DIEN", reuse=reuse):
+        with tf.variable_scope("DIEN_SelfAttention", reuse=reuse):
             input_seq_masked = tf.where(
                 tf.equal(input_seq, -1),
                 tf.zeros_like(input_seq) + self.n_item,  # 使用 n_item 作为填充索引
@@ -377,11 +374,90 @@ class Model(object):
                     dtype=tf.float32
                 )
 
-            # 2. 兴趣演化层 - 使用带注意力机制的 GRU 建模兴趣演化
+            # 2. 自注意力机制 - 修复版本
+            with tf.variable_scope("self_attention"):
+                # 定义自注意力参数
+                d_model = self.hidden_factor
+                num_heads = 4  # 多头注意力的头数
+
+                # 创建掩码 - 修复方法
+                # 直接创建序列长度的掩码矩阵
+                seq_len = tf.shape(input_seq)[1]
+                valid_seq = tf.cast(tf.not_equal(input_seq, -1), tf.float32)  # [batch_size, seq_len]
+
+                # 创建一个掩码矩阵，其中有效位置为1.0，无效位置为0.0
+                # 扩展维度以便进行广播
+                mask_a = tf.expand_dims(valid_seq, 2)  # [batch_size, seq_len, 1]
+                mask_b = tf.expand_dims(valid_seq, 1)  # [batch_size, 1, seq_len]
+                
+                # 通过矩阵乘法创建注意力掩码
+                attention_mask = tf.matmul(mask_a, mask_b)  # [batch_size, seq_len, seq_len]
+
+                # 多头自注意力
+                def scaled_dot_product_attention(q, k, v, mask):
+                    """计算注意力权重。
+                    q, k, v 必须具有匹配的前置维度。
+                    """
+                    matmul_qk = tf.matmul(q, k, transpose_b=True)  # (..., seq_len_q, seq_len_k)
+                    
+                    # 缩放 matmul_qk
+                    dk = tf.cast(tf.shape(k)[-1], tf.float32)
+                    scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
+                    
+                    # 将 mask 加入到缩放的张量上
+                    if mask is not None:
+                        scaled_attention_logits += (1.0 - mask) * -1e9
+                    
+                    # softmax 在最后一个轴（seq_len_k）上归一化
+                    attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
+                    
+                    output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
+                    
+                    return output, attention_weights
+                
+                # 线性变换
+                q = tf.layers.dense(gru_outputs, d_model)  # (batch_size, seq_len, d_model)
+                k = tf.layers.dense(gru_outputs, d_model)  # (batch_size, seq_len, d_model)
+                v = tf.layers.dense(gru_outputs, d_model)  # (batch_size, seq_len, d_model)
+                
+                # 分割成多头
+                batch_size = tf.shape(input_seq)[0]
+                
+                def split_heads(x, num_heads):
+                    """分拆最后一个维度到 (num_heads, depth)."""
+                    depth = d_model // num_heads
+                    x = tf.reshape(x, (batch_size, seq_len, num_heads, depth))
+                    return tf.transpose(x, perm=[0, 2, 1, 3])  # (batch_size, num_heads, seq_len, depth)
+                
+                q = split_heads(q, num_heads)  # (batch_size, num_heads, seq_len, depth)
+                k = split_heads(k, num_heads)  # (batch_size, num_heads, seq_len, depth)
+                v = split_heads(v, num_heads)  # (batch_size, num_heads, seq_len, depth)
+                
+                # 扩展 mask 到多头
+                # 修改掩码形状以适应多头注意力
+                attention_mask = tf.expand_dims(attention_mask, axis=1)  # [batch_size, 1, seq_len, seq_len]
+                
+                # 应用注意力机制
+                scaled_attention, attention_weights = scaled_dot_product_attention(
+                    q, k, v, attention_mask)
+                
+                # 合并多头
+                scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])  # (batch_size, seq_len, num_heads, depth)
+                concat_attention = tf.reshape(scaled_attention, 
+                                            (batch_size, seq_len, d_model))  # (batch_size, seq_len, d_model)
+                
+                # 最终的线性层
+                self_attention_output = tf.layers.dense(concat_attention, d_model)
+                
+                # 残差连接和层归一化
+                self_attention_output = self_attention_output + gru_outputs
+                self_attention_output = normalize(self_attention_output)
+
+            # 3. 兴趣演化层 - 使用带注意力机制的 GRU 建模兴趣演化
             with tf.variable_scope("interest_evolution"):
                 # 注意力权重计算
                 att_weights = tf.layers.dense(
-                    gru_outputs,
+                    self_attention_output,  # 使用自注意力的输出
                     units=1,
                     activation=None,
                     use_bias=False
@@ -389,7 +465,7 @@ class Model(object):
                 att_weights = tf.nn.softmax(att_weights, axis=1)
 
                 # 加权后的序列表示
-                weighted_seq = gru_outputs * att_weights
+                weighted_seq = self_attention_output * att_weights
 
                 # 兴趣演化GRU
                 augru_cell = tf.nn.rnn_cell.GRUCell(self.hidden_factor)
@@ -430,14 +506,6 @@ class Model(object):
         mask = tf.expand_dims(tf.to_float(tf.not_equal(input_seq, -1)), -1)
         reuse = tf.AUTO_REUSE
         with tf.variable_scope("SASRec", reuse=reuse):
-            # 修改这里：确保所有的 -1 值都被替换为有效的索引值
-            # 使用 self.n_item 作为填充值 (padding token)
-            input_seq_masked = tf.where(
-                tf.equal(input_seq, -1),
-                tf.zeros_like(input_seq) + self.n_item,  # 使用 n_item 作为填充索引
-                input_seq
-            )
-            
             # sequence embedding, item embedding table
             self.seq, item_emb_table = embedding(
                 input_seq_masked,  # 使用处理后的序列
@@ -680,12 +748,12 @@ class MetaData(object):
             u_k_i (`np.ndarray`): 所有得分
         """
         rank_chunk = traintest[:,:,2:2+N] #[batch,k,rank]
-        btch,k,n = rank_chunk.shape #[batch,k,rank]
-        rank_chunk_reshape = np.reshape(rank_chunk,[-1,n])
+        btch,k,n = rank_chunk.shape  # [batch, k, rank]
+        rank_chunk_reshape = np.reshape(rank_chunk, [-1, n])
 
         u_k_i = np.zeros([btch*k,self.n_item])     #[batch,k,n_item]
         for i in range(n):
-            u_k_i[np.arange(len(u_k_i)),rank_chunk_reshape[:,i]] = 1/(i+10)
+            u_k_i[np.arange(len(u_k_i)), rank_chunk_reshape[:,i]] = 1/(i+10)
         return np.reshape(u_k_i,[btch,k,self.n_item])
 
     def label_positive(self):

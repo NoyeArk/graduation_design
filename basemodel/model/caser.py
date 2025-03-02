@@ -101,7 +101,7 @@ class Caser(object):
             # training with negative samples
             pred = tf.squeeze(tf.matmul(x, tf.transpose(w2, perm=[0,2,1])), 1) + b2        
             self.target_pred, negative_pred = tf.split(pred, 2, axis=1)
-        
+
             # loss
             positive_loss = -tf.reduce_mean(tf.log(tf.nn.sigmoid(self.target_pred)))
             negative_loss = -tf.reduce_mean(tf.log(1 - tf.nn.sigmoid(negative_pred)))
@@ -127,7 +127,6 @@ class Caser(object):
                 self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
             elif self.optimizer_type == 'MomentumOptimizer':
                 self.optimizer = tf.train.MomentumOptimizer(learning_rate=self.learning_rate, momentum=0.95).minimize(self.loss)
-            
 
             self.out_all_topk = tf.nn.top_k(self.test_pred,200)
             self.trainable = tf.trainable_variables()
