@@ -1112,7 +1112,7 @@ class Train_MF(object):
         ]
 
 
-def SEM_main(
+def sem_main(
     name,
     factor,
     batch_size,

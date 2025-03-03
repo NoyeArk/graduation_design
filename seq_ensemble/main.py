@@ -1,5 +1,5 @@
-# from model.seq_ensemble import SEM_main
-from model.seq_llm import seq_llm_main
+from train import seq_llm_main
+from model.seq_ensemble import sem_main
 
 # 模型参数设置
 seed = 0
@@ -35,7 +35,7 @@ epoch = {
     'Grocery': 20,
     'Instant_Video': 20,
     'Games': 10,
-    'ml-1m': 20
+    'ml-1m': 10
 }
 
 # 不同数据集的最大序列长度设置
@@ -60,6 +60,7 @@ maxlen = {
 # 运行示例
 data = 'ml-1m'
 
+# seq_llm_main sem_main
 seq_llm_main(
     name=data,
     factor=factor,

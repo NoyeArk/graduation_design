@@ -1,13 +1,13 @@
 import torch
-from transformers import AutoTokenizer, AutoModel
 import torch.nn as nn
+from transformers import AutoTokenizer, AutoModel
 
 
 class ContentExtractionModule(nn.Module):
     """
     商品内容提取模块
     """
-    def __init__(self, pretrained_model="bert-base-chinese", max_length=512):
+    def __init__(self, pretrained_model="roberta-large", max_length=512):
         super().__init__()
         self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
         self.llm = AutoModel.from_pretrained(pretrained_model)
@@ -54,13 +54,21 @@ class ContentExtractionModule(nn.Module):
         Returns:
             str, 格式化的商品描述文本
         """
-        desc = f"商品信息如下。商品标题是'{item_info['title']}'。"
+        desc = f"Movie information: The title is '{item_info['title']}'."
         if 'category' in item_info:
-            desc += f"该商品属于'{item_info['category']}'类别"
+            desc += f" Genre: '{item_info['category']}'."
         if 'brand' in item_info:
-            desc += f"品牌是'{item_info['brand']}'。"
+            desc += f" Production company: '{item_info['brand']}'."
         if 'year' in item_info:
-            desc += f"发行年份是{item_info['year']}。"
+            desc += f" Release year: {item_info['year']}."
+
+        # 添加更丰富的描述以提高LLM输出质量
+        if 'category' in item_info and 'year' in item_info:
+            desc += f" This {item_info['year']} {item_info['category']} film "
+            desc += f"appeals to fans of {item_info['category']} cinema with its distinctive characteristics."
+        elif 'category' in item_info:
+            desc += f" As a {item_info['category']} movie, it showcases "
+            desc += f"the quintessential elements that define this genre."
 
         return desc
 
@@ -68,11 +76,11 @@ class ContentExtractionModule(nn.Module):
     def load_movielens_data(filepath="D:/Code/graduation_design/data/ml-1m/movies.dat", encoding='ISO-8859-1'):
         """
         加载MovieLens数据集中的电影信息
-        
+
         Args:
             filepath: str, MovieLens数据文件路径
             encoding: str, 文件编码格式
-            
+
         Returns:
             dict, 电影ID到电影信息的映射字典
         """
@@ -139,6 +147,7 @@ def main():
             embeddings_list.append(embedding)
 
         print(f"内容嵌入维度: {embedding.shape}")
+        print(f"内容嵌入: {embedding}")
 
 
 if __name__ == "__main__":
