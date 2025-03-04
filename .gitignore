@@ -7,3 +7,4 @@ Reason4Rec/Data/Data_of_Reason4Rec.zip
 basemodel/model/__pycache__/*
 datasets/*
 seq_ensemble/__pycache__/*
+seq_ensemble/model/__pycache__/*
