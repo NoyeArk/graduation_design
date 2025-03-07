@@ -1,0 +1,20 @@
+dataset:ml-1m
+dataset:ml-1m
+dataset:ml-1m
+dataset:ml-1m
+dataset:ml-1m
+dataset:ml-1m
+dataset:ml-1m
+Epoch 0 	 TEST SET MAP: 0.0547, NDCG: 0.1007, PREC: 0.2694
+Epoch 1 	 TEST SET MAP: 0.0543, NDCG: 0.1003, PREC: 0.2687
+Epoch 2 	 TEST SET MAP: 0.0538, NDCG: 0.0996, PREC: 0.2672
+Epoch 3 	 TEST SET MAP: 0.0539, NDCG: 0.1000, PREC: 0.2687
+dataset:ml-1m
+dataset:ml-1m
+Epoch 0 	 TEST SET MAP: 0.0532, NDCG: 0.0974, PREC: 0.2601
+Epoch 1 	 TEST SET MAP: 0.0520, NDCG: 0.0959, PREC: 0.2568
+Epoch 2 	 TEST SET MAP: 0.0522, NDCG: 0.0959, PREC: 0.2563
+Epoch 3 	 TEST SET MAP: 0.0519, NDCG: 0.0956, PREC: 0.2564
+Epoch 4 	 TEST SET MAP: 0.0514, NDCG: 0.0946, PREC: 0.2529
+Epoch 5 	 TEST SET MAP: 0.0519, NDCG: 0.0949, PREC: 0.2526
+Epoch 6 	 TEST SET MAP: 0.0518, NDCG: 0.0945, PREC: 0.2513

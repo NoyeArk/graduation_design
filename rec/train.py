@@ -7,7 +7,7 @@ from tqdm import tqdm
 from utils import *
 from GCNdata import Data
 from meta_data import MetaData
-from llm_rec.seq_llm import Llm4SeqRec
+from model.seq_llm import Llm4SeqRec
 
 
 def parse_args(name, factor, batch_size, tradeoff, user_module, model_module, div_module, epoch, maxlen):
