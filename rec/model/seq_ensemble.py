@@ -7,7 +7,7 @@ import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
 from utils import *
-from GCNdata import Data
+from rec.data_utils import Data
 
 N = 100  # 这个N是为了取前多少个items的score，大于N的设为0.
 

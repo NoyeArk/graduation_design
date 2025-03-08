@@ -1,80 +1,35 @@
 import copy
 import toolz
-import argparse
 import numpy as np
 from tqdm import tqdm
 
-from utils import *
-from GCNdata import Data
-from meta_data import MetaData
-from model.seq_llm import Llm4SeqRec
-
-
-def parse_args(name, factor, batch_size, tradeoff, user_module, model_module, div_module, epoch, maxlen):
-    parser = argparse.ArgumentParser(description="Run .")
-    parser.add_argument('--name', nargs='?', default= name)
-    parser.add_argument('--model', nargs='?', default='SASEM')
-    parser.add_argument('--path', nargs='?', default='D:/Code/graduation_design/data/'+name,
-                        help='Input data path.')
-    parser.add_argument('--dataset', nargs='?', default=name,
-                        help='Choose a dataset.')
-    parser.add_argument('--batch_size', type=int, default=batch_size,
-                        help='Batch size.')
-    parser.add_argument('--hidden_factor', type=int, default=factor,
-                        help='Number of hidden factors.')
-    parser.add_argument('--lamda', type=float, default = 0.00001,
-                        help='Regularizer for bilinear part.')
-    parser.add_argument('--lr', type=float, default=0.0001,
-                        help='Learning rate.')
-    parser.add_argument('--epoch', type=int, default=epoch)
-    parser.add_argument('--tradeoff', type=float, default=tradeoff)
-    parser.add_argument('--user_module', nargs='?', default=user_module)
-    parser.add_argument('--model_module', nargs='?', default=model_module)
-    parser.add_argument('--div_module', nargs='?', default=div_module)
-    parser.add_argument('--maxlen', type=int, default=maxlen)
-    parser.add_argument('--optimizer', nargs='?', default='AdamOptimizer',
-                        help='Specify an optimizer type (AdamOptimizer, AdagradOptimizer, GradientDescentOptimizer, MomentumOptimizer).')
-    return parser.parse_args()
-
 
 class Pipeline(object):
-    def __init__(self, args, data, meta_data):
+    def __init__(self, args, data, meta_data, model):
         self.args = args
-        self.epoch = self.args.epoch
-        self.batch_size = args.batch_size
-        self.seq_max_len = args.maxlen
-        self.print_train = False
-        # Data loading
+        self.epoch = self.args['epoch']
+        self.batch_size = args['batch_size']
         self.data = data
+        self.seq_max_len = self.data.args['maxlen']
+        self.print_train = False
         self.meta_data = meta_data
         self.entity = self.data.entity
         self.n_user = self.data.entity_num['user']
         self.n_item = self.data.entity_num['item']
-        # Training\\\建立模型
-        self.model = Llm4SeqRec(
-            self.args,
-            self.data,
-            args.hidden_factor,
-            args.lr,
-            args.lamda,
-            args.optimizer
-        )
-        with open("./process_result.txt", "a") as f:
-             f.write("dataset:%s\n" % (args.name))
+        self.model = model
+
+        # with open("./process_result.txt", "a") as f:
+        #      f.write("dataset:%s\n" % (args.name))
 
     def train(self):
-        # 初始结果
         MAP_valid = 0
         p = 0
 
         max_map, max_ndcg, max_prec = (0, 0), (0, 0), (0, 0)
         for epoch in range(0, self.epoch + 1):  # 每一次迭代训练
             shuffle = np.arange(len(self.meta_data.user_item_pairs))
-            # np.random.shuffle(shuffle)
 
-            # 用户-物品对
             user_item_pairs = self.meta_data.user_item_pairs  # none * 2
-
             self.users = user_item_pairs[:, 0]
             self.times = self.timestamp()
             self.items = user_item_pairs[:, 1]
@@ -100,10 +55,10 @@ class Pipeline(object):
             )  # none * NG * k
 
             # 基模型训练
-            base_focus = self.meta_data.train_meta[:, :, 2: 2 + self.seq_max_len] #none * k * p # p denotes window size
+            base_focus = self.meta_data.train_meta[:, :, 2: 2 + self.seq_max_len]  # none * k * p # p denotes window size
 
-            # 批量训练
-            for user_chunk in tqdm(toolz.partition_all(self.batch_size, [i for i in range(len(user_item_pairs))])):
+            pbar = tqdm(toolz.partition_all(self.batch_size, range(len(user_item_pairs))), desc=f"Epoch {epoch}")
+            for user_chunk in pbar:
                 p = p + 1
                 chunk = shuffle[list(user_chunk)]
 
@@ -130,65 +85,64 @@ class Pipeline(object):
                     'base_focus': base_focus_chunck,
                     'times': times
                 }
-                loss = self.model.partial_fit(self.feed_dict)
+                loss_rec, loss_div = self.model.partial_fit(self.feed_dict)
+                
+                pbar.set_postfix({
+                    'loss_rec': f'{loss_rec:.4f}',
+                    'loss_div': f'{loss_div:.4f}'
+                })
 
-            # 评估训练和验证数据集
-            if epoch % 1 == 0:
-                print(f"Loss {loss[0]:.4f}\t{loss[1]:.4f}")
-
-                # 评估训练和验证数据集
-                if self.print_train:
-                    init_test_TopK_train = self.evaluate_TopK(
-                        test=self.data.valid_set[:10000],
-                        test_meta=self.meta_data.train_meta[:10000],
-                        topk=[10]
-                    )
-                    print(init_test_TopK_train)
-
-                # 评估测试集
-                init_test_TopK_test = self.evaluate_TopK(
-                    test=self.data.test_set,
-                    test_meta=self.meta_data.test_meta,
-                    topk=[20, 50]
+            if self.print_train:
+                init_test_TopK_train = self.evaluate_TopK(
+                    test=self.data.valid_set[:10000],
+                    test_meta=self.meta_data.train_meta[:10000],
+                    topk=[10]
                 )
+                print(init_test_TopK_train)
 
-                print(f"Epoch {epoch} \t TEST SET MAP: {init_test_TopK_test[0]:.4f}, NDCG: {init_test_TopK_test[1]:.4f}, PREC: {init_test_TopK_test[2]:.4f}\n")
+            maps, ndcgs, recalls = self.evaluate_TopK(
+                test=self.data.test_set,
+                test_meta=self.meta_data.test_meta,
+                topk=[20, 50]
+            )
 
-                with open("./process_result.txt", "a") as f:
-                    f.write(f"Epoch {epoch} \t TEST SET MAP: {init_test_TopK_test[0]:.4f}, NDCG: {init_test_TopK_test[1]:.4f}, PREC: {init_test_TopK_test[2]:.4f}\n")
+            for topk in [20, 50]:
+                print(f"------> epoch {epoch} top{topk} map: {maps[topk]}, ndcg: {ndcgs[topk]}, prec: {recalls[topk]}")
 
-                if MAP_valid < np.mean(init_test_TopK_test[4:]):
-                    MAP_valid = np.mean(init_test_TopK_test[4:])
-                    result_print = init_test_TopK_test
+            # with open("./process_result.txt", "a") as f:
+            #     f.write(f"Epoch {epoch} \t TEST SET MAP: {test_results[0]:.4f}, NDCG: {test_results[1]:.4f}, PREC: {test_results[2]:.4f}\n")
 
-                max_map = (max(max_map[0], result_print[0]), max(max_map[1], result_print[3]))
-                max_ndcg = (max(max_ndcg[0], result_print[1]), max(max_ndcg[1], result_print[4]))
-                max_prec = (max(max_prec[0], result_print[2]), max(max_prec[1], result_print[5]))
+            # if MAP_valid < np.mean(init_test_TopK_test[4:]):
+            #     MAP_valid = np.mean(init_test_TopK_test[4:])
+            #     result_print = init_test_TopK_test
 
-        # 保存最终模型
-        # self.model.save_model(f"./models/{self.args.name}_{self.args.model}/.ckpt")
+            # max_map = (max(max_map[0], result_print[0]), max(max_map[1], result_print[3]))
+            # max_ndcg = (max(max_ndcg[0], result_print[1]), max(max_ndcg[1], result_print[4]))
+            # max_prec = (max(max_prec[0], result_print[2]), max(max_prec[1], result_print[5]))
 
-        with open("./result.txt","a") as f:
-            f.write("{},{},{},{},{},{},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f}\n".format(
-                self.args.name,
-                self.args.model,
-                self.args.user_module,
-                self.args.model_module,
-                self.args.div_module,
-                self.args.tradeoff,
-                max_map[0],
-                max_ndcg[0],
-                max_prec[0],
-                max_map[1],
-                max_ndcg[1],
-                max_prec[1]
-                # result_print[0],
-                # result_print[1],
-                # result_print[2],
-                # result_print[3],
-                # result_print[4],
-                # result_print[5]
-            ))
+        self.model.save_model(f"D:/Code/graduation_design/ckpt/model.ckpt")
+
+        # with open("./result.txt","a") as f:
+        #     f.write("{},{},{},{},{},{},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f}\n".format(
+        #         self.args.name,
+        #         self.args.model,
+        #         self.args.user_module,
+        #         self.args.model_module,
+        #         self.args.div_module,
+        #         self.args.tradeoff,
+        #         max_map[0],
+        #         max_ndcg[0],
+        #         max_prec[0],
+        #         max_map[1],
+        #         max_ndcg[1],
+        #         max_prec[1]
+        #         # result_print[0],
+        #         # result_print[1],
+        #         # result_print[2],
+        #         # result_print[3],
+        #         # result_print[4],
+        #         # result_print[5]
+        #     ))
 
     def sample_negative(self, user_item_pairs, meta_data, negative_sample_count):
         """
@@ -322,54 +276,13 @@ class Pipeline(object):
                             continue
                         else:
                             useful_item_cnt += 1
-        return [
-            np.mean(result_map[topk[0]]),
-            np.mean(result_ndcg[topk[0]]),
-            np.mean(result_recall[topk[0]]),
-            np.mean(result_map[topk[1]]),
-            np.mean(result_ndcg[topk[1]]),
-            np.mean(result_recall[topk[1]])
-        ]
 
-
-def seq_llm_main(
-    name,
-    factor,
-    batch_size,
-    tradeoff,
-    user_module,
-    model_module,
-    div_module,
-    epoch,
-    maxlen
-):
-    """
-    主函数
-
-    Args:
-        name (`str`): 数据集名称
-        factor (`int`): 隐向量维度
-        batch_size (`int`): 批量大小
-        tradeoff (`float`): 权衡参数
-        user_module (`str`): 用户模块
-        model_module (`str`): 模型模块
-        div_module (`str`): 多样性模块
-        epoch (`int`): 训练轮数
-        maxlen (`int`): 最大序列长度
-    """
-    args = parse_args(
-        name,
-        factor,
-        batch_size,
-        tradeoff,
-        user_module,
-        model_module,
-        div_module,
-        epoch,
-        maxlen
-    )
-    print(args)
-    data = Data(args, 0)  # 获取数据
-    meta_data = MetaData(args, data)
-    pipeline = Pipeline(args, data, meta_data)
-    pipeline.train()
+        return result_map, result_ndcg, result_recall
+        # return [
+        #     np.mean(result_map[topk[0]]),
+        #     np.mean(result_ndcg[topk[0]]),
+        #     np.mean(result_recall[topk[0]]),
+        #     np.mean(result_map[topk[1]]),
+        #     np.mean(result_ndcg[topk[1]]),
+        #     np.mean(result_recall[topk[1]])
+        # ]

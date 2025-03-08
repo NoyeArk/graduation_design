@@ -15,14 +15,13 @@ class MetaData(object):
             for i, line in enumerate(data.dict_list['user_item'])
         }
 
-        self.base_models = ['acf', 'fdsa', 'harnn', 'caser', 'pfmc', 'sasrec', 'anam']
+        self.base_models = self.args['base_model']
         self.top_k_items = 100  # 这个top_k_items是为了取前多少个items的score，大于top_k_items的设为0.
 
-        # 加载基础模型预测结果
         self.meta = []
         for base_model in self.base_models:
-            load = np.load(f"D:/Code/graduation_design/datasets/basemodel_v/{self.args.name}/{base_model}.npy")
-            self.meta.append(load)
+            res = np.load(self.args['path'] + f"/{base_model}.npy")
+            self.meta.append(res)
         meta = np.stack(self.meta, axis=1)
 
         # meta_XXXX 表示 [user, item, ranking(102)]

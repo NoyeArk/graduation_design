@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from rec.model.learn import ContentExtractionModule, UserTower
+from module.learn import ContentExtractionModule, UserTower
 
 
 # 'ACF', 'FDSA', 'HARNN' 需要 attribute 信息，Caser', 'PFMC', 'SASRec' 仅依赖于序列信息。

@@ -98,16 +98,17 @@ class Data(object):
     """
     def __init__(self, args, seed=0, Markov=False):
         self.name_id = dict()
-        self.name = args.dataset
-        self.dir = args.path if args.path[-1] == '/' else args.path + '/'
+        self.args = args
+        self.name = args['name']
+        self.dir = args['path']
 
-        if args.name in ['CiaoDVD', 'dianping']:
+        if args['name'] in ['CiaoDVD', 'dianping']:
             self.encoding = 'utf-8'
         else:
             self.encoding= 'iso-8859-15'
+        
+        self.drop_user, self.drop_item = args['user_drop_threshold'], args['item_drop_threshold']
     
-        self.epoch = 100
-
 #        if self.name in ['ML']:
 #            self.entity = ['user','item','G','A','C','D']#
 #            self.user_side_entity = []
@@ -119,10 +120,10 @@ class Data(object):
 #            self.item_side_entity = ['G']#'C'
 #            self.drop_user,self.drop_item = 3,3
         if self.name in ['Amazon_App', 'Games', 'ml-1m']:
-            self.entity = ['user','item','G']#'C',
+            self.entity = ['user', 'item', 'G']#'C',
             self.user_side_entity = []
             self.item_side_entity = ['G']#'C'
-            self.drop_user, self.drop_item = 10, 10
+            
         if self.name in ['Grocery']:
             self.entity = ['user','item','G']#'C',
             self.user_side_entity = []
@@ -175,7 +176,7 @@ class Data(object):
         try:
             self.latest_interaction = self.get_latest_interaction(
                 user_item_pairs=self.dict_list['user_item'],
-                keep=args.maxlen
+                keep=args['maxlen']
             )  # 时间特征
         except AttributeError:
             self.latest_interaction = self.get_latest_interaction(
@@ -321,8 +322,6 @@ class Data(object):
 
         # 遍历用户-物品对
         for i, (user, item) in enumerate(user_item_pairs):
-            if user == 1 and item == 112:
-                print('--------------------------------')
             result[(user, item)] = copy.deepcopy(list(latest[-keep:]))
             if i < len(user_item_pairs) - 1:
                 if user_item_pairs[i + 1][0] != user:
@@ -353,8 +352,8 @@ class Data(object):
             user2id (`dict`): 用户 ID 映射
             item2id (`dict`): 物品 ID 映射
         """
-        file_path = self.dir + 'ratings.dat'
-        df = pd.read_csv(file_path, sep='::', header=None, nrows=leave_num)
+        file_path = self.dir + '/' + 'ratings.dat'
+        df = pd.read_csv(file_path, sep='::', header=None, nrows=leave_num, engine='python')
         df.columns = ['user', 'item', 'rating', 'time']
 
         # 按用户和时间排序
@@ -408,7 +407,7 @@ class Data(object):
             len(others) (`int`): 其他实体数量
         """
         b_other = []
-        file_path = self.dir + subdir
+        file_path = self.dir + '/' + subdir
         print(file_path)
         with codecs.open(file_path, 'r', encoding=self.encoding) as rfile:  # iso-8859-15
             for line in rfile:

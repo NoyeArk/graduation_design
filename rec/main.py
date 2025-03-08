@@ -1,6 +1,24 @@
-from train import seq_llm_main
-from model.seq_ensemble import sem_main
+import yaml
 
+from train import Pipeline
+from data_utils import Data
+from meta_data import MetaData
+from model.seq_learn import SeqLearn
+
+
+if __name__ == "__main__":
+    with open("D:/Code/graduation_design/rec/config/seq_llm.yaml", 'r', encoding='utf-8') as f:
+        config = yaml.unsafe_load(f)
+    print(config)
+
+    data = Data(config['data'], 0)
+    meta_data = MetaData(config['meta'], data)
+    model = SeqLearn(config['model'], data)
+    pipeline = Pipeline(config['train'], data, meta_data, model)
+    pipeline.train()
+
+
+"""
 # 模型参数设置
 seed = 0
 factor = 128
@@ -56,19 +74,4 @@ maxlen = {
 # w/o bDE: tradeoff[data], 'SAtt', 'static', 'cov'
 # w/o Div: 0.0, 'SAtt', 'dynamic', 'cov'
 # w/o TPDiv: tradeoff[data], 'SAtt', 'dynamic', 'AEM-cov'
-
-# 运行示例
-data = 'ml-1m'
-
-# seq_llm_main sem_main
-seq_llm_main(
-    name=data,
-    factor=factor,
-    batch_size=batch_size[data],
-    tradeoff=tradeoff[data],
-    user_module='DIEN',
-    model_module='dynamic',
-    div_module='cov',
-    epoch=epoch[data],
-    maxlen=maxlen[data]
-)
+"""

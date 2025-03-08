@@ -4,41 +4,29 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+from module.learn import ItemTower
 from module.llm_cem import ContentExtractionModule
-
+from transformers import BertTokenizer, BertModel
 
 # 'ACF', 'FDSA', 'HARNN' 需要 attribute 信息，Caser', 'PFMC', 'SASRec' 仅依赖于序列信息。
 print_train = False  # 是否输出 train 上的验证结果（过拟合解释）
 base_models = ['acf', 'fdsa', 'harnn', 'caser', 'pfmc', 'sasrec', 'anam']
 
 
-class Llm4SeqRec(nn.Module):
-    def __init__(self, args, data, hidden_dim, learning_rate, reg_weight, optimizer_type):
-        """
-        初始化模型
-
-        Args:
-            args (`argparse.Namespace`): 参数
-            data (`Data`): 数据
-            hidden_dim (`int`): 隐藏因子
-            learning_rate (`float`): 学习率
-            reg_weight (`float`): 正则化系数
-            optimizer_type (`str`): 优化器类型
-        """
-        super(Llm4SeqRec, self).__init__()
+class SeqLearn(nn.Module):
+    def __init__(self, args, data):
+        super(SeqLearn, self).__init__()
         self.args = args
         self.data = data
         self.n_user = self.data.entity_num['user']
         self.n_item = self.data.entity_num['item']
-        self.learning_rate = learning_rate
-        self.hidden_dim = hidden_dim
-        self.reg_weight = reg_weight
-        self.optimizer_type = optimizer_type
+        self.learning_rate = args['lr']
+        self.hidden_dim = args['hidden_dim']
+        self.reg_weight = args['lamda']
+        self.optimizer_type = args['optimizer']
         self.n_base_model = len(base_models)
-        self.seq_max_len = self.args.maxlen
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cuda:0")
-        print(self.device)
-
+        self.seq_max_len = self.data.args['maxlen']
+        self.device = torch.device("cuda:0")
         self.cem = ContentExtractionModule()
         self.movies_data = self.cem.load_movielens_data()
         self._precompute_item_embeddings()
@@ -50,14 +38,14 @@ class Llm4SeqRec(nn.Module):
         """
         预计算所有电影的内容嵌入
         """
-        cache_path = f"D:/Code/graduation_design/data/{self.args.name}/item_embeddings.npy"
+        cache_path = f"D:/Code/graduation_design/data/{self.data.args['name']}/item_embeddings.npy"
         if os.path.exists(cache_path):
             print("加载预计算的物品嵌入...")
-            self.item_llm_embeddings = torch.from_numpy(np.load(cache_path)).float()
+            self.item_llm_embeddings = torch.from_numpy(np.load(cache_path)).float().to(self.device)
             return
 
         print("预计算物品内容嵌入...")
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = self.device  # 使用类中定义的设备
         self.cem.to(device)
 
         batch_size = 32
@@ -75,15 +63,29 @@ class Llm4SeqRec(nn.Module):
                 descriptions.append(desc)
 
             with torch.no_grad():
-                batch_embeddings = self.cem(descriptions).cpu()
-                embeddings.extend(batch_embeddings)
+                # 确保编码后的输入在正确的设备上
+                encoded = self.cem.tokenizer(
+                    descriptions,
+                    padding=True,
+                    truncation=True,
+                    max_length=self.cem.max_length,
+                    return_tensors="pt"
+                )
+                # 将编码后的输入移到正确的设备上
+                encoded = {k: v.to(device) for k, v in encoded.items()}
+                
+                # 使用修改后的编码直接调用模型
+                outputs = self.cem.llm(**encoded)
+                hidden_states = outputs.last_hidden_state
+                batch_embeddings = self.cem.pooling(hidden_states.unsqueeze(1)).squeeze(1)
+                embeddings.extend(batch_embeddings.cpu())  # 先转到CPU再添加到列表
 
             if (i + batch_size) % 1000 == 0 or i + batch_size >= len(item_ids):
                 print(f"处理进度: {i + batch_size}/{len(item_ids)}")
 
         # 保存为numpy数组
-        self.item_llm_embeddings = torch.stack(embeddings)
-        np.save(cache_path, self.item_llm_embeddings.numpy())
+        self.item_llm_embeddings = torch.stack(embeddings).to(self.device)
+        np.save(cache_path, self.item_llm_embeddings.cpu().numpy())
         print(f"物品内容嵌入已保存到: {cache_path}")
 
     def _initialize_weights(self):
@@ -92,6 +94,12 @@ class Llm4SeqRec(nn.Module):
         self.item_embeddings2 = nn.Embedding(self.n_item, self.hidden_dim)
         # 序列权重
         self.seq_weights = nn.Parameter(torch.randn(1, 1, self.seq_max_len, 1) * 0.01)
+
+        # 添加ItemTower用于获取用户嵌入
+        self.item_tower = ItemTower(hidden_factor=self.hidden_dim,
+                                   pretrained_model_name=self.args['pretrain_llm'],
+                                   max_length=128,
+                                   data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat")
 
         # LLM投影层
         self.llm_projection = nn.Linear(self.item_llm_embeddings.shape[-1], self.hidden_dim)
@@ -152,32 +160,17 @@ class Llm4SeqRec(nn.Module):
         计算增强版DIEN(Deep Interest Evolution Network)的输出，增加了自注意力机制。
         
         Args:
-            input_seq (`torch.Tensor`): 输入序列 [batch_size, seq_len]
+            input_seq (`torch.Tensor`): 输入序列 [batch_size, seq_len, hidden_dim]
 
         Returns:
             `torch.Tensor`: 增强版DIEN的输出 [batch_size, seq_len, hidden_dim]
         """
-        # 创建掩码
-        mask = (input_seq != -1).float().unsqueeze(-1)
-
-        # 处理输入序列
-        input_seq_masked = torch.where(
-            input_seq == -1,
-            torch.zeros_like(input_seq) + self.n_item,
-            input_seq
-        )
-
-        # 获取序列的嵌入表示
-        seq_emb = self.dien_item_embeddings(input_seq_masked)
-
-        # 应用掩码
-        seq_emb = seq_emb * mask
-
         # GRU层提取兴趣
-        gru_outputs, _ = self.gru(seq_emb)
+        gru_outputs, _ = self.gru(input_seq)
 
         # 创建注意力掩码
-        valid_seq = (input_seq != -1).float()
+        batch_size, seq_len, _ = input_seq.shape
+        valid_seq = torch.ones((batch_size, seq_len), device=input_seq.device)
         mask_a = valid_seq.unsqueeze(2)
         mask_b = valid_seq.unsqueeze(1)
         attention_mask = torch.bmm(mask_a, mask_b)
@@ -211,7 +204,6 @@ class Llm4SeqRec(nn.Module):
         final_outputs, _ = self.augru(weighted_seq)
 
         final_outputs = F.dropout(final_outputs, p=0.5, training=self.training)
-        final_outputs = final_outputs * mask
         final_outputs = self.layer_norm2(final_outputs)
 
         return final_outputs
@@ -274,7 +266,7 @@ class Llm4SeqRec(nn.Module):
         self,
         user_id,
         input_seq,
-        base_model_focus_llm=None,
+        base_focus=None,
         is_train=True,
         positive_scores=None,
         negative_scores=None,
@@ -286,7 +278,7 @@ class Llm4SeqRec(nn.Module):
         Args:
             user_id (`torch.Tensor`): 用户ID
             input_seq (`torch.Tensor`): 输入序列
-            base_model_focus_llm (`torch.Tensor`, optional): 基模型大模型表示
+            base_focus (`torch.Tensor`, optional): 基模型推理结果表示
             is_train (`bool`, optional): 是否训练
             positive_scores (`torch.Tensor`, optional): 正样本得分
             negative_scores (`torch.Tensor`, optional): 负样本得分
@@ -295,23 +287,17 @@ class Llm4SeqRec(nn.Module):
         Returns:
             `dict`: 包含损失和预测结果的字典
         """
-        user_emb = self.user_embeddings(user_id)
-        user_representation = self.dien_with_self_attention(input_seq)
-        preference = user_representation[:, -1, :] + user_emb
+        # user 侧
+        user_emb = self.user_embeddings(user_id)  # bc, hidden_dim  
+        user_interaction = self.item_tower(input_seq)  # bc, seq_len, hidden_dim
+        preference = self.dien_with_self_attention(user_interaction)[:, -1, :] + user_emb  # bc, hidden_dim
 
-        items_embs = self.dien_item_embeddings.weight[1:]
-
-        # 直接从LLM嵌入向量投影到隐藏维度
+        # item 侧
+        base_model_focus_llm = self._convert_focus_to_llm_embeddings(base_focus)
         each_model_emb = self.llm_projection(base_model_focus_llm)
         basemodel_emb = each_model_emb.mean(dim=2)
 
-        # 计算每个时间步的权重
-        # wgt_model = torch.tensor(
-        #     1 / np.log2(np.arange(self.seq_max_len) + 2),
-        #     dtype=torch.float32,
-        #     device=self.device
-        # ).reshape(1, 1, -1, 1)
-
+        # 计算基模型权重
         wgts_org = torch.sum(preference.unsqueeze(1) * basemodel_emb, dim=-1)
         wgts = F.softmax(wgts_org, dim=-1)
 
@@ -326,7 +312,7 @@ class Llm4SeqRec(nn.Module):
             for param in self.parameters():
                 loss_reg += self.reg_weight * torch.sum(param ** 2)
 
-            if self.args.div_module == 'AEM-cov':
+            if self.args['div_module'] == 'AEM-cov':
                 model_emb = basemodel_emb
                 cov_idx = torch.ones(1, self.n_base_model, self.n_base_model, device=self.device)
                 cov_idx = cov_idx - torch.eye(self.n_base_model, device=self.device).unsqueeze(0)
@@ -354,7 +340,7 @@ class Llm4SeqRec(nn.Module):
                 )
                 cov = cov_idx * (1 - cov_div)
 
-            loss_diversity = -self.args.tradeoff * torch.sum(cov)
+            loss_diversity = -self.args['tradeoff'] * torch.sum(cov)
             loss = loss_rec + loss_reg  # + loss_diversity
 
             results.update({
@@ -392,14 +378,13 @@ class Llm4SeqRec(nn.Module):
 
         # 转换 base_focus 为大模型嵌入
         base_focus = torch.tensor(data_dict['base_focus'], dtype=torch.long, device=self.device)
-        base_focus_llm = self._convert_focus_to_llm_embeddings(base_focus)
 
         self.train()
         self.optimizer.zero_grad()
         results = self.forward(
             user_id=user_id,
             input_seq=input_seq,
-            base_model_focus_llm=base_focus_llm,
+            base_focus=base_focus,
             is_train=True,
             positive_scores=positive_scores,
             negative_scores=negative_scores
@@ -427,14 +412,13 @@ class Llm4SeqRec(nn.Module):
         meta_all_items = torch.tensor(items_score, dtype=torch.float, device=self.device)
 
         base_focus = torch.tensor(base_focus, dtype=torch.long, device=self.device)
-        base_focus_llm = self._convert_focus_to_llm_embeddings(base_focus)
 
         self.eval()
         with torch.no_grad():
             results = self.forward(
                 user_id=user_id,
                 input_seq=input_seq,
-                base_model_focus_llm=base_focus_llm,
+                base_focus=base_focus,
                 is_train=False,
                 all_items_scores=meta_all_items
             )

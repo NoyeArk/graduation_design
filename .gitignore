@@ -11,3 +11,5 @@ seq_ensemble/model/__pycache__/*
 rec/__pycache__/*
 rec/model/__pycache__/*
 rec/module/__pycache__/*
+base_model_results/*
+cache/*
