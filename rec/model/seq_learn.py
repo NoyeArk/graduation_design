@@ -2,11 +2,9 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 from module.learn import ItemTower
 from module.llm_cem import ContentExtractionModule
-from transformers import BertTokenizer, BertModel
 
 # 'ACF', 'FDSA', 'HARNN' 需要 attribute 信息，Caser', 'PFMC', 'SASRec' 仅依赖于序列信息。
 print_train = False  # 是否输出 train 上的验证结果（过拟合解释）
@@ -28,89 +26,28 @@ class SeqLearn(nn.Module):
         self.seq_max_len = self.data.args['maxlen']
         self.device = torch.device("cuda:0")
         self.cem = ContentExtractionModule()
-        self.movies_data = self.cem.load_movielens_data()
-        self._precompute_item_embeddings()
         self._initialize_weights()
         self.to(self.device)
         self._initialize_optimizer()
 
-    def _precompute_item_embeddings(self):
-        """
-        预计算所有电影的内容嵌入
-        """
-        cache_path = f"D:/Code/graduation_design/data/{self.data.args['name']}/item_embeddings.npy"
-        if os.path.exists(cache_path):
-            print("加载预计算的物品嵌入...")
-            self.item_llm_embeddings = torch.from_numpy(np.load(cache_path)).float().to(self.device)
-            return
-
-        print("预计算物品内容嵌入...")
-        device = self.device  # 使用类中定义的设备
-        self.cem.to(device)
-
-        batch_size = 32
-        embeddings = []
-
-        # 从1到n_item处理所有物品(加1因为电影ID从1开始)
-        item_ids = list(range(1, self.n_item + 1))
-        for i in range(0, len(item_ids), batch_size):
-            batch_ids = item_ids[i:i+batch_size]
-            descriptions = []
-
-            for item_id in batch_ids:
-                movie_info = self.movies_data.get(str(item_id), {'title': f'未知电影{item_id}', 'category': '未知类别'})
-                desc = self.cem.extract_features(movie_info)
-                descriptions.append(desc)
-
-            with torch.no_grad():
-                # 确保编码后的输入在正确的设备上
-                encoded = self.cem.tokenizer(
-                    descriptions,
-                    padding=True,
-                    truncation=True,
-                    max_length=self.cem.max_length,
-                    return_tensors="pt"
-                )
-                # 将编码后的输入移到正确的设备上
-                encoded = {k: v.to(device) for k, v in encoded.items()}
-                
-                # 使用修改后的编码直接调用模型
-                outputs = self.cem.llm(**encoded)
-                hidden_states = outputs.last_hidden_state
-                batch_embeddings = self.cem.pooling(hidden_states.unsqueeze(1)).squeeze(1)
-                embeddings.extend(batch_embeddings.cpu())  # 先转到CPU再添加到列表
-
-            if (i + batch_size) % 1000 == 0 or i + batch_size >= len(item_ids):
-                print(f"处理进度: {i + batch_size}/{len(item_ids)}")
-
-        # 保存为numpy数组
-        self.item_llm_embeddings = torch.stack(embeddings).to(self.device)
-        np.save(cache_path, self.item_llm_embeddings.cpu().numpy())
-        print(f"物品内容嵌入已保存到: {cache_path}")
-
     def _initialize_weights(self):
         self.user_embeddings = nn.Embedding(self.n_user, self.hidden_dim)
-        self.item_embeddings1 = nn.Embedding(self.n_item, self.hidden_dim)
-        self.item_embeddings2 = nn.Embedding(self.n_item, self.hidden_dim)
-        # 序列权重
         self.seq_weights = nn.Parameter(torch.randn(1, 1, self.seq_max_len, 1) * 0.01)
 
         # 添加ItemTower用于获取用户嵌入
         self.item_tower = ItemTower(hidden_factor=self.hidden_dim,
                                    pretrained_model_name=self.args['pretrain_llm'],
-                                   max_length=128,
-                                   data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat")
+                                   max_length=self.data.args['maxlen'],
+                                   data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat",
+                                   device=self.device)
 
         # LLM投影层
-        self.llm_projection = nn.Linear(self.item_llm_embeddings.shape[-1], self.hidden_dim)
+        self.llm_projection = nn.Linear(self.item_tower.item_embeddings.shape[-1], self.hidden_dim)
 
         # 初始化权重
         nn.init.normal_(self.user_embeddings.weight, 0, 0.01)
-        nn.init.normal_(self.item_embeddings1.weight, 0, 0.01)
-        nn.init.normal_(self.item_embeddings2.weight, 0, 0.01)
 
         # DIEN + attention
-        self.dien_item_embeddings = nn.Embedding(self.n_item + 1, self.hidden_dim, padding_idx=0)
         self.gru = nn.GRU(self.hidden_dim, self.hidden_dim, batch_first=True)
         self.attention_layer = nn.Linear(self.hidden_dim, 1)
         self.self_attention_q = nn.Linear(self.hidden_dim, self.hidden_dim)
@@ -140,7 +77,7 @@ class SeqLearn(nn.Module):
             `torch.Tensor`: 形状为[bc, n_base_model, seq_len, hidden_size]的大模型嵌入
         """
         batch_size, n_base_model, seq_len = base_focus.shape
-        hidden_size = self.item_llm_embeddings.shape[-1]
+        hidden_size = self.item_tower.item_embeddings.shape[-1]
 
         # 初始化结果张量
         result = torch.zeros((batch_size, n_base_model, seq_len, hidden_size), device=self.device)
@@ -151,7 +88,7 @@ class SeqLearn(nn.Module):
                     item_id = base_focus[b, k, s].item()
                     # 因为物品ID需要+1才与movies.dat匹配
                     if 0 <= item_id < self.n_item:  # 确保ID在有效范围内
-                        result[b, k, s] = self.item_llm_embeddings[item_id]
+                        result[b, k, s] = self.item_tower.item_embeddings[item_id]
 
         return result
 
@@ -326,7 +263,7 @@ class SeqLearn(nn.Module):
                 cov_div2 = torch.bmm(l2.unsqueeze(-1), l2.unsqueeze(1))
                 cov = cov_div1 / cov_div2
 
-            elif self.args.div_module == 'cov':
+            elif self.args['div_module'] == 'cov':
                 model_emb = basemodel_emb
                 cov_wgt = torch.cat([wgts.unsqueeze(1) + wgts.unsqueeze(2)], dim=0)
                 cov_idx = torch.ones(1, self.n_base_model, self.n_base_model, device=self.device)
@@ -389,6 +326,7 @@ class SeqLearn(nn.Module):
             positive_scores=positive_scores,
             negative_scores=negative_scores
         )
+
         results['loss'].backward()
         self.optimizer.step()
 

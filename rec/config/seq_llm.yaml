@@ -3,6 +3,7 @@ base_path: &base_path "D:/Code/graduation_design/"
 data:
   maxlen: 5
   name: &dataset_name "ml-1m"
+  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item_embeddings.npy"]
   path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name]
 
   user_drop_threshold: 10
@@ -23,14 +24,14 @@ model:
   lr: 0.0001
   type: "SASEM"
   lamda: 0.00001
-  hidden_dim: 128
+  hidden_dim: 32
   device: "cuda:0"
-  div_module: "cov"
   optimizer: "AdamOptimizer"
 
+  tradeoff: 2
+  div_module: "cov"
   pretrain_llm: "bert-base-uncased"
 
 train:
   epoch: 10
-  batch_size: 1024
-  
+  batch_size: 256

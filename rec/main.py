@@ -14,6 +14,17 @@ if __name__ == "__main__":
     data = Data(config['data'], 0)
     meta_data = MetaData(config['meta'], data)
     model = SeqLearn(config['model'], data)
+
+    for name, param in model.named_parameters():
+        if name.startswith('cem.llm'):
+            param.requires_grad = False
+
+    print("---------------------------")
+    # 查看每层可训练参数
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(f"层: {name}, 形状: {param.shape}, 可训练参数量: {param.numel()}, {param.requires_grad}")
+
     pipeline = Pipeline(config['train'], data, meta_data, model)
     pipeline.train()
 

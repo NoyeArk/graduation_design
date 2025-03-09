@@ -86,7 +86,7 @@ class Pipeline(object):
                     'times': times
                 }
                 loss_rec, loss_div = self.model.partial_fit(self.feed_dict)
-                
+
                 pbar.set_postfix({
                     'loss_rec': f'{loss_rec:.4f}',
                     'loss_div': f'{loss_div:.4f}'

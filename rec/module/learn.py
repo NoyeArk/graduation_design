@@ -1,4 +1,6 @@
+import os
 import torch
+import numpy as np
 import torch.nn as nn
 from transformers import BertModel, BertTokenizer
 
@@ -63,16 +65,8 @@ class ContentExtractionModule(nn.Module):
         self.hidden_factor = hidden_factor
         self.pretrained_model_name = pretrained_model_name
         self.max_length = max_length
-        self.tokenizer = BertTokenizer.from_pretrained(
-            pretrained_model_name
-            # cache_dir=f"../../cache/models--bert-base-uncased/snapshots/86b5e0934494bd15c9632b12f734a8a67f723594",
-            # local_files_only=True
-        )
-        self.llm = BertModel.from_pretrained(
-            pretrained_model_name
-            # cache_dir=f"../../cache/models--bert-base-uncased/snapshots/86b5e0934494bd15c9632b12f734a8a67f723594",
-            # local_files_only=True
-        )
+        self.tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)
+        self.llm = BertModel.from_pretrained(pretrained_model_name)
 
         # 冻结预训练LLM的参数
         for param in self.llm.parameters():
@@ -102,7 +96,7 @@ class ContentExtractionModule(nn.Module):
         """
 
         # 对文本进行编码
-        inputs = self.tokenizer(prompt, return_tensors="pt", max_length=self.max_length, 
+        inputs = self.tokenizer(prompt, return_tensors="pt", max_length=self.max_length,
                                padding="max_length", truncation=True)
 
         inputs = {k: v.to(self.llm.device) for k, v in inputs.items()}
@@ -215,9 +209,11 @@ class ItemTower(nn.Module):
     """
     物品塔，处理物品特征并生成物品嵌入
     """
-    def __init__(self, hidden_factor=64, pretrained_model_name="bert-base-uncased", max_length=128, 
-                 data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat"):
+    def __init__(self, hidden_factor=64, pretrained_model_name="bert-base-uncased", max_length=128,
+                 data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat", device=None):
         super(ItemTower, self).__init__()
+        self.device = device
+        self.hidden_factor = hidden_factor
 
         # 内容提取模块
         self.cex = ContentExtractionModule(
@@ -226,7 +222,7 @@ class ItemTower(nn.Module):
             max_length=max_length
         )
 
-        # 物品特征转换层
+        # 物品特征转换层 - 确保输入维度与LLM输出维度匹配
         self.item_transform = nn.Sequential(
             nn.Linear(hidden_factor, hidden_factor),
             nn.ReLU(),
@@ -235,6 +231,66 @@ class ItemTower(nn.Module):
 
         self.layer_norm = nn.LayerNorm(hidden_factor)
         self.movies_data = self.load_movielens_data(data_filepath)
+        self._precompute_item_embeddings()
+
+    def _precompute_item_embeddings(self):
+        """
+        预计算所有电影的内容嵌入
+        """
+        cache_path = f"D:/Code/graduation_design/data/ml-1m/item_embeddings.npy"
+        if os.path.exists(cache_path):
+            print("加载预计算的物品嵌入...")
+            self.item_embeddings = torch.from_numpy(np.load(cache_path)).float().to(self.device)
+            return
+
+        print("预计算物品内容嵌入...")
+        self.cex.to(self.device)
+        self.item_transform.to(self.device)
+        self.layer_norm.to(self.device)
+
+        batch_size = 32
+        embeddings = []
+
+        # 获取所有电影ID
+        item_ids = list(self.movies_data.keys())
+        for i in range(0, len(item_ids), batch_size):
+            batch_ids = item_ids[i:i+batch_size]
+            batch_descriptions = []
+
+            for item_id in batch_ids:
+                movie_info = self.movies_data.get(item_id, {'title': f'未知电影{item_id}', 'category': '未知类别'})
+                # 确保movie_info包含所有必要的键
+                if 'brand' not in movie_info:
+                    movie_info['brand'] = 'Unknown'
+                if 'price' not in movie_info:
+                    movie_info['price'] = 'N/A'
+                if 'keywords' not in movie_info:
+                    movie_info['keywords'] = movie_info.get('category', 'Unknown')
+                if 'features' not in movie_info:
+                    movie_info['features'] = 'standard viewing'
+
+                batch_descriptions.append(movie_info)
+
+            with torch.no_grad():
+                # 获取内容嵌入
+                content_embeddings = self.cex(batch_descriptions)  # 使用forward方法处理批次
+                # 确保content_embeddings在正确的设备上
+                content_embeddings = content_embeddings.to(self.device)
+
+                # 应用物品特征转换
+                item_embeddings_batch = self.item_transform(content_embeddings)
+                item_embeddings_batch = self.layer_norm(item_embeddings_batch)
+
+                # 添加到结果列表
+                embeddings.append(item_embeddings_batch.cpu())
+
+            if (i + batch_size) % 1000 == 0 or i + batch_size >= len(item_ids):
+                print(f"处理进度: {i + batch_size}/{len(item_ids)}")
+
+        # 合并所有批次的嵌入
+        self.item_embeddings = torch.cat(embeddings, dim=0).to(self.device)
+        np.save(cache_path, self.item_embeddings.cpu().numpy())
+        print(f"物品内容嵌入已保存到: {cache_path}")
 
     @staticmethod
     def load_movielens_data(filepath, encoding='ISO-8859-1'):
@@ -318,19 +374,26 @@ class ItemTower(nn.Module):
         """
         batch_size, seq_len = item_id.shape
 
-        # 获取每个批次和序列位置的物品描述信息
+        # 使用预计算的物品嵌入
         item_embeddings = []
         for b in range(batch_size):
             seq_embeddings = []
             for s in range(seq_len):
-                # 获取物品描述信息
-                item_description = self.extract_item_description(item_id[b][s])
+                # 获取物品ID并确保在有效范围内
+                item_idx = item_id[b][s].item()
+                if 0 <= item_idx < self.item_embeddings.shape[0]:
+                    # 直接使用预计算的嵌入
+                    item_embedding = self.item_embeddings[item_idx]
+                else:
+                    # 对于无效ID使用零向量
+                    item_embedding = torch.zeros(self.hidden_factor,
+                                              device=item_id.device)
 
-                # 获取内容嵌入
-                content_embedding = self.cex.process_item_description(item_description)
+                # 确保item_embedding在正确的设备上
+                item_embedding = item_embedding.to(item_id.device)
 
                 # 转换物品特征
-                item_embedding = self.item_transform(content_embedding)
+                item_embedding = self.item_transform(item_embedding)
                 item_embedding = self.layer_norm(item_embedding)
 
                 seq_embeddings.append(item_embedding)
