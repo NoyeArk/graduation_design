@@ -29,6 +29,7 @@ class MetaData(object):
             self.user_item_pairs_to_index[line[0], line[1]]
             for line in self.data.valid_set
         ]]
+        print(self.train_meta.shape)
         self.test_meta = meta[[
             self.user_item_pairs_to_index[line[0], line[1]]
             for line in self.data.test_set
@@ -62,6 +63,9 @@ class MetaData(object):
     def label_positive(self):
         """
         返回正样本得分的函数
+
+        Returns:
+            tuple: 包含用户-物品对和对应的得分
         """
         # 在需要时设置 users 值
         user_item_pairs = np.array(self.data.train_set)

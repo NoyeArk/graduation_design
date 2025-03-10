@@ -210,9 +210,12 @@ class ItemTower(nn.Module):
     物品塔，处理物品特征并生成物品嵌入
     """
     def __init__(self, hidden_factor=64, pretrained_model_name="bert-base-uncased", max_length=128,
-                 data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat", device=None):
+                 data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat", 
+                 cache_path="D:/Code/graduation_design/data/ml-1m/item_embeddings.npy",
+                 device=None):
         super(ItemTower, self).__init__()
         self.device = device
+        self.cache_path = cache_path
         self.hidden_factor = hidden_factor
 
         # 内容提取模块
@@ -237,10 +240,9 @@ class ItemTower(nn.Module):
         """
         预计算所有电影的内容嵌入
         """
-        cache_path = f"D:/Code/graduation_design/data/ml-1m/item_embeddings.npy"
-        if os.path.exists(cache_path):
+        if os.path.exists(self.cache_path):
             print("加载预计算的物品嵌入...")
-            self.item_embeddings = torch.from_numpy(np.load(cache_path)).float().to(self.device)
+            self.item_embeddings = torch.from_numpy(np.load(self.cache_path)).float().to(self.device)
             return
 
         print("预计算物品内容嵌入...")
@@ -289,8 +291,8 @@ class ItemTower(nn.Module):
 
         # 合并所有批次的嵌入
         self.item_embeddings = torch.cat(embeddings, dim=0).to(self.device)
-        np.save(cache_path, self.item_embeddings.cpu().numpy())
-        print(f"物品内容嵌入已保存到: {cache_path}")
+        np.save(self.cache_path, self.item_embeddings.cpu().numpy())
+        print(f"物品内容嵌入已保存到: {self.cache_path}")
 
     @staticmethod
     def load_movielens_data(filepath, encoding='ISO-8859-1'):

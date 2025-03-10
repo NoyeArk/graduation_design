@@ -263,7 +263,9 @@ class Data(object):
         print(
             f'user: {self.entity_num["user"]}\t'
             f'item: {self.entity_num["item"]}\t'
-            f'train: {len(self.train_set)}'
+            f'train_set: {len(self.train_set)}\t'
+            f'valid_set: {len(self.valid_set)}\t'
+            f'test_set: {len(self.test_set)}'
         )
         if self.name in ['Grocery', 'Kindle', 'Games']:
             self.pic = self.pic_feature('feature.npy')

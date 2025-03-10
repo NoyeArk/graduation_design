@@ -38,7 +38,8 @@ class SeqLearn(nn.Module):
         self.item_tower = ItemTower(hidden_factor=self.hidden_dim,
                                    pretrained_model_name=self.args['pretrain_llm'],
                                    max_length=self.data.args['maxlen'],
-                                   data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat",
+                                   data_filepath=f"{self.data.args['item_path']}",
+                                   cache_path=f"{self.data.args['item_emb_path']}",
                                    device=self.device)
 
         # LLM投影层
@@ -46,7 +47,6 @@ class SeqLearn(nn.Module):
 
         # 初始化权重
         nn.init.normal_(self.user_embeddings.weight, 0, 0.01)
-
         # DIEN + attention
         self.gru = nn.GRU(self.hidden_dim, self.hidden_dim, batch_first=True)
         self.attention_layer = nn.Linear(self.hidden_dim, 1)
@@ -214,12 +214,12 @@ class SeqLearn(nn.Module):
 
         Args:
             user_id (`torch.Tensor`): 用户ID
-            input_seq (`torch.Tensor`): 输入序列
-            base_focus (`torch.Tensor`, optional): 基模型推理结果表示
+            input_seq (`torch.Tensor`): 输入序列，形状为 [batch_size, seq_len]
+            base_focus (`torch.Tensor`, optional): 基模型推理结果表示，形状为 [batch_size, n_base_model, seq_len]
             is_train (`bool`, optional): 是否训练
-            positive_scores (`torch.Tensor`, optional): 正样本得分
-            negative_scores (`torch.Tensor`, optional): 负样本得分
-            all_items_scores (`torch.Tensor`, optional): 所有物品的得分
+            positive_scores (`torch.Tensor`, optional): 正样本得分，形状为 [batch_size, n_base_model]
+            negative_scores (`torch.Tensor`, optional): 负样本得分，形状为 [batch_size, n_base_model]
+            all_items_scores (`torch.Tensor`, optional): 所有物品的得分，形状为 [batch_size, n_item]
 
         Returns:
             `dict`: 包含损失和预测结果的字典
@@ -243,11 +243,11 @@ class SeqLearn(nn.Module):
         if is_train and positive_scores is not None and negative_scores is not None:
             positive_scores = torch.sum(positive_scores * wgts, dim=1)
             negative_scores = torch.sum(negative_scores * wgts.unsqueeze(1), dim=-1)
-            loss_rec = -torch.mean(torch.log(torch.sigmoid(positive_scores - negative_scores)))
+            loss_rec = -torch.sum(torch.sigmoid(positive_scores - negative_scores))
 
             loss_reg = 0
-            for param in self.parameters():
-                loss_reg += self.reg_weight * torch.sum(param ** 2)
+            # for param in self.parameters():
+            #     loss_reg += self.reg_weight * torch.sum(param ** 2)
 
             if self.args['div_module'] == 'AEM-cov':
                 model_emb = basemodel_emb
@@ -278,12 +278,13 @@ class SeqLearn(nn.Module):
                 cov = cov_idx * (1 - cov_div)
 
             loss_diversity = -self.args['tradeoff'] * torch.sum(cov)
-            loss = loss_rec + loss_reg  # + loss_diversity
+            loss = loss_rec # + loss_reg  + loss_diversity
 
             results.update({
                 'loss': loss,
                 'loss_rec': loss_rec,
-                'loss_diversity': loss_diversity
+                'loss_diversity': loss_diversity,
+                'loss_reg': loss_reg
             })
 
         if all_items_scores is not None:
@@ -328,9 +329,25 @@ class SeqLearn(nn.Module):
         )
 
         results['loss'].backward()
+        
+        # 打印所有参数的梯度统计信息
+        for name, param in self.named_parameters():
+            if param.requires_grad:
+                print(f"{name}:")
+                print(f"  梯度是否存在: {param.grad is not None}")
+                if param.grad is not None:
+                    print(f"  梯度形状: {param.grad.shape}")
+                    print(f"  梯度均值: {param.grad.mean().item()}")
+                    print(f"  梯度标准差: {param.grad.std().item()}")
+                    print(f"  梯度最小值: {param.grad.min().item()}")
+                    print(f"  梯度最大值: {param.grad.max().item()}")
+                    print(f"  梯度范数: {param.grad.norm().item()}")
+                    print(f"  是否有NaN: {torch.isnan(param.grad).any().item()}")
+                    print(f"  是否有Inf: {torch.isinf(param.grad).any().item()}")
+
         self.optimizer.step()
 
-        return results['loss_rec'].item(), results['loss_diversity'].item()
+        return results['loss_rec'].item(), results['loss_diversity'].item(), 0
 
     def topk(self, user_item_pairs, last_interaction, items_score, base_focus):
         """

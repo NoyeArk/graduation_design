@@ -85,11 +85,12 @@ class Pipeline(object):
                     'base_focus': base_focus_chunck,
                     'times': times
                 }
-                loss_rec, loss_div = self.model.partial_fit(self.feed_dict)
+                loss_rec, loss_div, loss_reg = self.model.partial_fit(self.feed_dict)
 
                 pbar.set_postfix({
                     'loss_rec': f'{loss_rec:.4f}',
-                    'loss_div': f'{loss_div:.4f}'
+                    'loss_div': f'{loss_div:.4f}',
+                    'loss_reg': f'{loss_reg:.4f}'
                 })
 
             if self.print_train:
@@ -159,23 +160,34 @@ class Pipeline(object):
         # 基础模型训练
         BM_train = self.data.dict_forward['train']
 
-        # 只使用每个基础模型预测的前 50 个排名结果
-        top_k_results = 50
-        meta_data = meta_data[:, :, 2:2+top_k_results]
-
-        # 重塑元数据
-        meta_data = np.reshape(meta_data, [len(meta_data), -1])  # [none, k*50]
-        num_rows, _ = meta_data.shape
+        # 获取数据行数
+        num_rows = len(user_item_pairs)
         sample = []
 
         # 进行 negative_sample_count 次负样本生成
         for _ in range(negative_sample_count):
-            # 随机生成样本
-            sample_i = np.random.randint(0, self.n_item, num_rows)
-            for j, item in enumerate(sample_i):
-                # 如果样本在基础模型中，则重新生成样本
-                if item in BM_train[user_item_pairs[j, 0]]:
-                    sample_i[j] = np.random.randint(0, self.n_item)
+            # 初始化负样本数组
+            sample_i = np.zeros(num_rows, dtype=np.int32)
+            
+            # 为每个用户生成负样本
+            for j in range(num_rows):
+                user = user_item_pairs[j, 0]
+                # 获取用户已交互的物品集合
+                user_items = BM_train[user]
+                
+                # 尝试最多10次找到一个合适的负样本
+                for attempt in range(10):
+                    neg_item = np.random.randint(0, self.n_item)
+                    if neg_item not in user_items:
+                        sample_i[j] = neg_item
+                        break
+                        
+                # 如果10次尝试后仍未找到负样本，使用一个可能的负样本
+                if sample_i[j] == 0 and len(user_items) < self.n_item:
+                    # 找到一个用户未交互过的物品
+                    candidate_items = np.setdiff1d(np.arange(self.n_item), list(user_items))
+                    sample_i[j] = np.random.choice(candidate_items)
+            
             sample.append(sample_i)
 
         return np.stack(sample, axis=-1)

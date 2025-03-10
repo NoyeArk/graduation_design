@@ -7,17 +7,21 @@ from model.seq_learn import SeqLearn
 
 
 if __name__ == "__main__":
-    with open("D:/Code/graduation_design/rec/config/seq_llm.yaml", 'r', encoding='utf-8') as f:
+    with open("config/seq_llm.yaml", 'r', encoding='utf-8') as f:
         config = yaml.unsafe_load(f)
     print(config)
 
     data = Data(config['data'], 0)
     meta_data = MetaData(config['meta'], data)
-    model = SeqLearn(config['model'], data)
+    model = SeqLearn(config['model'], data) 
 
     for name, param in model.named_parameters():
         if name.startswith('cem.llm'):
             param.requires_grad = False
+
+    # 计算可训练总参数量
+    total_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"可训练总参数量: {total_trainable_params:,}")
 
     print("---------------------------")
     # 查看每层可训练参数
