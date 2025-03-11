@@ -41,7 +41,7 @@ def set_forward(dict1):
     for key in dict1.keys():
         sub = dict1[key]
         return_1[key] = {ky:set(sub[ky]) for ky in sub.keys()}
-    return return_1
+    return return_1  # (834449, 7, 102)
 
 
 def build_sparse_matrix(n_1, n_2, list1):
@@ -291,7 +291,7 @@ class Data(object):
         user2id, item2id = reverse_and_map(user_list), reverse_and_map(item_list)
         self.name_id['item'] = item2id
 
-        return np.array(remove_unrating_user_and_rename(user2id,item2id, user_item)),num_user, num_item,user2id, item2id
+        return np.array(remove_unrating_user_and_rename(user2id, item2id, user_item)),num_user, num_item,user2id, item2id
 
     def _load_item_side_entities(self, subdir):
         """

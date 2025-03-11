@@ -18,3 +18,4 @@ base_model_results.zip
 .ipynb_checkpoints/requirements-checkpoint.txt
 rec/.ipynb_checkpoints/main-checkpoint.py
 rec/config/.ipynb_checkpoints/seq_llm-checkpoint.yaml
+rec/bpr/__pycache__/*

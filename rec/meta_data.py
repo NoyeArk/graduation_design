@@ -29,7 +29,6 @@ class MetaData(object):
             self.user_item_pairs_to_index[line[0], line[1]]
             for line in self.data.valid_set
         ]]
-        print(self.train_meta.shape)
         self.test_meta = meta[[
             self.user_item_pairs_to_index[line[0], line[1]]
             for line in self.data.test_set
@@ -46,19 +45,19 @@ class MetaData(object):
         返回所有得分的函数
 
         Args:
-            traintest (np.ndarray): 训练集或测试集
+            traintest (`np.ndarray`): 训练集或测试集
 
         Returns:
-            u_k_i (np.ndarray): 所有得分
+            u_k_i (`np.ndarray`): 所有得分
         """
         rank_chunk = traintest[:,:,2:2+self.top_k_items] #[batch,k,rank]
-        btch,k,n = rank_chunk.shape  # [batch, k, rank]
+        btch, k, n = rank_chunk.shape  # [batch, k, rank]
         rank_chunk_reshape = np.reshape(rank_chunk, [-1, n])
 
-        u_k_i = np.zeros([btch*k,self.n_item])     #[batch,k,n_item]
+        u_k_i = np.zeros([btch*k, self.n_item])     #[batch,k,n_item]
         for i in range(n):
-            u_k_i[np.arange(len(u_k_i)), rank_chunk_reshape[:,i]] = 1/(i+10)
-        return np.reshape(u_k_i,[btch,k,self.n_item])
+            u_k_i[np.arange(len(u_k_i)), rank_chunk_reshape[:,i]] = 1 / (i + 10)
+        return np.reshape(u_k_i, [btch, k, self.n_item])
 
     def label_positive(self):
         """
