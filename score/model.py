@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from rec.module.learn import ItemTower
-from rec.module.llm_cem import ContentExtractionModule
+from module.learn import ItemTower
+from module.llm_cem import ContentExtractionModule
 
 # 'ACF', 'FDSA', 'HARNN' 需要 attribute 信息，Caser', 'PFMC', 'SASRec' 仅依赖于序列信息。
 print_train = False  # 是否输出 train 上的验证结果（过拟合解释）
@@ -12,18 +12,18 @@ base_models = ['acf', 'fdsa', 'harnn', 'caser', 'pfmc', 'sasrec', 'anam']
 
 
 class SeqLearn(nn.Module):
-    def __init__(self, args, data):
+    def __init__(self, args, data_args, n_user, n_item):
         super(SeqLearn, self).__init__()
         self.args = args
-        self.data = data
-        self.n_user = self.data.entity_num['user']
-        self.n_item = self.data.entity_num['item']
+        self.data_args = data_args
+        self.n_user = n_user
+        self.n_item = n_item
         self.learning_rate = args['lr']
         self.hidden_dim = args['hidden_dim']
         self.reg_weight = args['lamda']
         self.optimizer_type = args['optimizer']
         self.n_base_model = len(base_models)
-        self.seq_max_len = self.data.args['maxlen']
+        self.seq_max_len = self.data_args['maxlen']
         self.device = torch.device("cuda:0")
         self.cem = ContentExtractionModule()
         self._initialize_weights()
@@ -37,9 +37,9 @@ class SeqLearn(nn.Module):
         # 添加ItemTower用于获取用户嵌入
         self.item_tower = ItemTower(hidden_factor=self.hidden_dim,
                                    pretrained_model_name=self.args['pretrain_llm'],
-                                   max_length=self.data.args['maxlen'],
-                                   data_filepath=f"{self.data.args['item_path']}",
-                                   cache_path=f"{self.data.args['item_emb_path']}",
+                                   max_length=self.data_args['maxlen'],
+                                   data_filepath=f"{self.data_args['item_path']}",
+                                   cache_path=f"{self.data_args['item_emb_path']}",
                                    device=self.device)
 
         # LLM投影层
@@ -57,6 +57,12 @@ class SeqLearn(nn.Module):
         self.layer_norm1 = nn.LayerNorm(self.hidden_dim)
         self.layer_norm2 = nn.LayerNorm(self.hidden_dim)
         self.augru = nn.GRU(self.hidden_dim, self.hidden_dim, batch_first=True)
+
+        self.score_layer = nn.Sequential(
+            nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, 1),
+        )
 
     def _initialize_optimizer(self):
         if self.optimizer_type == 'AdamOptimizer':
@@ -82,13 +88,22 @@ class SeqLearn(nn.Module):
         # 初始化结果张量
         result = torch.zeros((batch_size, n_base_model, seq_len, hidden_size), device=self.device)
 
-        for b in range(batch_size):
-            for k in range(n_base_model):
-                for s in range(seq_len):
-                    item_id = base_focus[b, k, s].item()
-                    # 因为物品ID需要+1才与movies.dat匹配
-                    if 0 <= item_id < self.n_item:  # 确保ID在有效范围内
-                        result[b, k, s] = self.item_tower.item_embeddings[item_id]
+        # 将base_focus展平为2D张量以便一次性索引
+        flat_focus = base_focus.reshape(-1)
+        
+        # 创建掩码标识有效的item_id
+        valid_mask = (flat_focus >= 0) & (flat_focus < self.n_item)
+        valid_indices = flat_focus[valid_mask]
+        
+        # 获取对应的嵌入
+        valid_embeddings = self.item_tower.item_embeddings[valid_indices]
+        
+        # 将结果放回原始形状
+        result_flat = result.reshape(-1, hidden_size)
+        result_flat[valid_mask] = valid_embeddings
+        
+        # 恢复原始形状
+        result = result_flat.reshape(batch_size, n_base_model, seq_len, hidden_size)
 
         return result
 
@@ -199,123 +214,79 @@ class SeqLearn(nn.Module):
         seq_emb = self.layer_norms[-1](seq_emb)
         return seq_emb
 
-    def forward(self, users, user_seq, pos_items, neg_items, base_model_preds):
+    def forward(self, users, user_seq, items, base_model_preds):
         """
         前向传播
 
         Args:
             users (`torch.Tensor`): 用户ID
             user_seq (`torch.Tensor`): 用户序列
-            pos_items (`torch.Tensor`): 正样本
-            neg_items (`torch.Tensor`): 负样本
+            items (`torch.Tensor`): 物品ID
             base_model_preds (`torch.Tensor`): 基模型预测
 
         Returns:
             `dict`: 包含损失和预测结果的字典
         """
+        # 获取用户嵌入
+        user_emb = self.user_embeddings(users)  # batch_size, hidden_dim
+        
+        # 获取物品嵌入 - 确保使用不同的物品ID
+        item_emb = self.item_tower(items.unsqueeze(1)).squeeze(1)  # batch_size, hidden_dim
+
         # user 侧
-        user_emb = self.user_embeddings(users)  # bc, hidden_dim  
         user_interaction = self.item_tower(user_seq)  # bc, seq_len, hidden_dim
         preference = self.dien_with_self_attention(user_interaction)[:, -1, :] + user_emb  # bc, hidden_dim
 
         # item 侧
-        base_model_focus_llm = self._convert_focus_to_llm_embeddings(base_model_preds)
-        each_model_emb = self.llm_projection(base_model_focus_llm)
-        basemodel_emb = each_model_emb.mean(dim=2)
+        base_model_focus_llm = self._convert_focus_to_llm_embeddings(base_model_preds)  # bc, n_base_model, seq_len, hidden_dim
+        each_model_emb = self.llm_projection(base_model_focus_llm)  # bc, n_base_model, seq_len, hidden_dim
+        basemodel_emb = each_model_emb.mean(dim=2)  # bc, n_base_model, hidden_dim
 
         # 计算基模型权重
         wgts_org = torch.sum(preference.unsqueeze(1) * basemodel_emb, dim=-1)
         wgts = F.softmax(wgts_org, dim=-1)
 
-        results = {'wgts': wgts}
+        # 使用基模型权重乘以基模型嵌入
+        weighted_basemodel_emb = torch.sum(basemodel_emb * wgts.unsqueeze(-1), dim=1)  # bc, hidden_dim
+        
+        scores = self.score_layer(torch.cat([weighted_basemodel_emb, item_emb], dim=-1))
 
-        if is_train and positive_scores is not None and negative_scores is not None:
-            positive_scores = torch.sum(positive_scores * wgts, dim=1)
-            negative_scores = torch.sum(negative_scores * wgts.unsqueeze(1), dim=-1)
-            loss_rec = -torch.sum(torch.sigmoid(positive_scores - negative_scores))
-
-            loss_reg = 0
-            # for param in self.parameters():
-            #     loss_reg += self.reg_weight * torch.sum(param ** 2)
-
-            if self.args['div_module'] == 'AEM-cov':
-                model_emb = basemodel_emb
-                cov_idx = torch.ones(1, self.n_base_model, self.n_base_model, device=self.device)
-                cov_idx = cov_idx - torch.eye(self.n_base_model, device=self.device).unsqueeze(0)
-                cov_div1 = torch.square(
-                    torch.sum(
-                        model_emb.unsqueeze(1) * model_emb.unsqueeze(2),
-                        dim=-1
-                    )
-                )
-                l2 = torch.sum(model_emb ** 2, dim=-1)
-                cov_div2 = torch.bmm(l2.unsqueeze(-1), l2.unsqueeze(1))
-                cov = cov_div1 / cov_div2
-
-            elif self.args['div_module'] == 'cov':
-                model_emb = basemodel_emb
-                cov_wgt = torch.cat([wgts.unsqueeze(1) + wgts.unsqueeze(2)], dim=0)
-                cov_idx = torch.ones(1, self.n_base_model, self.n_base_model, device=self.device)
-                cov_idx = cov_idx - torch.eye(self.n_base_model, device=self.device).unsqueeze(0)
-
-                cov_div = torch.square(
-                    torch.sum(
-                        model_emb.unsqueeze(1) * model_emb.unsqueeze(2),
-                        dim=-1
-                    )
-                )
-                cov = cov_idx * (1 - cov_div)
-
-    def partial_fit(self, data_dict):
+        return scores
+    
+    def predict(self, users, user_seq, items, base_model_preds):
         """
-        拟合一个批次。
+        预测用户对物品的评分
 
         Args:
-            data_dict (`dict`): 数据字典
+            users (`torch.Tensor`): 用户ID，形状为 [batch_size, num_items]
+            user_seq (`torch.Tensor`): 用户序列，形状为 [batch_size, num_items, seq_len]
+            items (`torch.Tensor`): 物品ID，形状为 [num_items]
+            base_model_preds (`torch.Tensor`): 基模型预测，形状为 [batch_size, num_items, seq_len]
 
         Returns:
-            tuple: (loss_rec, loss_diversity)
+            `torch.Tensor`: 预测分数，形状为 [batch_size, num_items]
         """
-        # 将数据转移到设备
-        user_id = torch.tensor(data_dict['u'], dtype=torch.long, device=self.device)
-        input_seq = torch.tensor(data_dict['seq'], dtype=torch.long, device=self.device)
-        positive_scores = torch.tensor(data_dict['meta_pos'], dtype=torch.float, device=self.device)
-        negative_scores = torch.tensor(data_dict['meta_neg'], dtype=torch.float, device=self.device)
+        # user 侧
+        user_emb = self.user_embeddings(users)  # bc, hidden_dim
+        user_interaction = self.item_tower(user_seq)  # bc, seq_len, hidden_dim
+        preference = self.dien_with_self_attention(user_interaction)[:, -1, :] + user_emb  # bc, hidden_dim
 
-        # 转换 base_focus 为大模型嵌入
-        base_focus = torch.tensor(data_dict['base_focus'], dtype=torch.long, device=self.device)
+        # item 侧
+        base_model_focus_llm = self._convert_focus_to_llm_embeddings(base_model_preds)  # bc, n_base_model, seq_len, hidden_dim
+        each_model_emb = self.llm_projection(base_model_focus_llm)  # bc, n_base_model, seq_len, hidden_dim
+        basemodel_emb = each_model_emb.mean(dim=2)  # bc, n_base_model, hidden_dim
+        basemodel_emb = each_model_emb.mean(dim=2)  # bc, n_base_model, hidden_dim
 
-        self.train()
-        self.optimizer.zero_grad()
-        results = self.forward(
-            user_id=user_id,
-            input_seq=input_seq,
-            base_focus=base_focus,
-            is_train=True,
-            positive_scores=positive_scores,
-            negative_scores=negative_scores
-        )
+        # 计算基模型权重
+        wgts_org = torch.sum(preference.unsqueeze(1) * basemodel_emb, dim=-1)
+        wgts = F.softmax(wgts_org, dim=-1)
+        item_emb = self.item_tower(items.unsqueeze(1)).squeeze(1)  # bc, hidden_dim
 
-        results['loss'].backward()
-        
-        # 打印所有参数的梯度统计信息
-        for name, param in self.named_parameters():
-            if param.requires_grad:
-                print(f"{name}:")
-                print(f"  梯度是否存在: {param.grad is not None}")
-                if param.grad is not None:
-                    print(f"  梯度形状: {param.grad.shape}")
-                    print(f"  梯度均值: {param.grad.mean().item()}")
-                    print(f"  梯度标准差: {param.grad.std().item()}")
-                    print(f"  梯度最小值: {param.grad.min().item()}")
-                    print(f"  梯度最大值: {param.grad.max().item()}")
-                    print(f"  梯度范数: {param.grad.norm().item()}")
-                    print(f"  是否有NaN: {torch.isnan(param.grad).any().item()}")
-                    print(f"  是否有Inf: {torch.isinf(param.grad).any().item()}")
+        # 使用基模型权重乘以基模型嵌入
+        weighted_basemodel_emb = torch.sum(basemodel_emb * wgts.unsqueeze(-1), dim=1)  # bc, hidden_dim
 
-        self.optimizer.step()
-
-        return results['loss_rec'].item(), results['loss_diversity'].item(), 0
+        scores = self.score_layer(torch.cat([weighted_basemodel_emb, item_emb], dim=-1))
+        return scores
 
     def topk(self, user_item_pairs, last_interaction, items_score, base_focus):
         """

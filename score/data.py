@@ -1,0 +1,243 @@
+import torch
+import numpy as np
+import pandas as pd
+import torch.nn as nn
+from tqdm import tqdm
+from collections import defaultdict
+from torch.utils.data import Dataset
+
+
+class BPRSampleGenerator:
+    """
+    贝叶斯个性化排序(BPR)样本生成器
+    用于从用户-物品交互数据中构造正负样本对
+    """
+
+    def __init__(self, args):
+        """
+        初始化BPR样本生成器
+        
+        Args:
+            data_path: 数据文件路径，如果为None则需要后续调用load_data方法
+            sep: 数据分隔符
+            names: 列名列表，默认为['user', 'item', 'rating', 'timestamp']
+            rating_threshold: 评分阈值，大于等于该值的交互被视为正向交互
+        """
+        self.data = None
+        self.args = args
+        self.user_interacted_items = None
+        self.all_items = None
+        self.user_to_id = {}
+        self.item_to_id = {}
+        self.id_to_user = {}
+        self.id_to_item = {}
+
+        self.names = ['user', 'item', 'rating', 'timestamp']
+        self.rating_threshold = args['rating_threshold']
+        self.user_threshold = args['user_threshold']
+        self.item_threshold = args['item_threshold']
+        self.load_data(args['path'])
+
+    def load_data(self, data_path):
+        """
+        加载数据并进行预处理
+        
+        Args:
+            data_path: 数据文件路径
+            sep: 数据分隔符
+        """
+        if 'nrows' in self.args:
+            self.data = pd.read_csv(data_path, sep=self.args['sep'], header=None, engine='python', nrows=self.args['nrows'])
+        else:
+            self.data = pd.read_csv(data_path, sep=self.args['sep'], header=None, engine='python')
+        self.data.columns = ['user', 'item', 'rating', 'timestamp']
+
+        # 过滤评分
+        if self.rating_threshold > 0:
+            self.data = self.data[self.data['rating'] > self.rating_threshold]
+            
+        # 过滤交互次数少于阈值的用户和物品
+        user_counts = self.data['user'].value_counts()
+        item_counts = self.data['item'].value_counts()
+        
+        users_to_keep = user_counts[user_counts >= self.user_threshold].index
+        items_to_keep = item_counts[item_counts >= self.item_threshold].index
+
+        self.data = self.data[self.data['user'].isin(users_to_keep)]
+        self.data = self.data[self.data['item'].isin(items_to_keep)]
+
+        # 重置索引
+        self.data = self.data.reset_index(drop=True)
+
+        # 用户和物品ID映射（如果原始ID不是连续整数）
+        self._create_id_mappings()
+
+        # 检查交互索引的范围
+        if self.interaction_indices:
+            min_idx = min(self.interaction_indices.values())
+            max_idx = max(self.interaction_indices.values()) 
+            print(f">>>> 交互索引范围: 最小值 = {min_idx}, 最大值 = {max_idx}")
+
+        # 按时间戳排序
+        self.data = self.data.sort_values('timestamp')
+
+        # 构建用户交互字典
+        self.user_interacted_items = defaultdict(set)
+        for row in self.data.itertuples():
+            user_id = self.user_to_id[row.user]
+            item_id = self.item_to_id[row.item]
+            self.user_interacted_items[user_id].add(item_id)
+
+        # 所有物品集合
+        self.all_items = set(self.data['item_id'].unique())
+        
+        print(f">>>> 数据加载完成: {len(self.data)} 条交互, {self.n_user} 个用户, {self.n_item} 个物品")
+
+        # 加载基模型的预测结果
+        self.base_model_preds = []
+        for base_model in self.args['base_model']:
+            res = np.load(self.args['base_model_path'] + f"/{base_model}.npy")
+            self.base_model_preds.append(res)
+        self.base_model_preds = np.stack(self.base_model_preds, axis=1)
+        print(f">>>> 基模型的预测结果加载完成: {self.base_model_preds.shape}")
+
+    def _create_id_mappings(self):
+        """创建用户和物品的ID映射"""
+        # 获取唯一用户和物品
+        unique_users = self.data['user'].unique()
+        unique_items = self.data['item'].unique()
+
+        # 创建映射字典
+        self.user_to_id = {user: i for i, user in enumerate(unique_users)}
+        self.item_to_id = {item: i for i, item in enumerate(unique_items)}
+        self.id_to_user = {i: user for user, i in self.user_to_id.items()}
+        self.id_to_item = {i: item for item, i in self.item_to_id.items()}
+
+        self.n_user = len(self.user_to_id)
+        self.n_item = len(self.item_to_id)
+
+        # 添加ID列到数据中
+        self.data['user_id'] = self.data['user'].map(self.user_to_id)
+        self.data['item_id'] = self.data['item'].map(self.item_to_id)
+
+        # 添加交互索引映射
+        self.interaction_indices = {}
+        for idx, row in self.data.iterrows():
+            key = (row['user_id'], row['item_id'])
+            self.interaction_indices[key] = idx
+
+    def get_user_seq(self, max_seq_len=50):
+        """
+        获取每个用户的历史交互序列
+
+        Args:
+            max_seq_len: 序列最大长度，默认为50
+            
+        Returns:
+            user_seq: 字典，键为用户ID，值为该用户按时间排序的交互物品ID列表
+        """
+        user_seq = defaultdict(list)
+        
+        # 按用户ID和时间戳排序
+        sorted_data = self.data.sort_values(['user_id', 'timestamp'])
+        
+        for row in sorted_data.itertuples():
+            user_id = row.user_id
+            item_id = row.item_id
+            user_seq[user_id].append(item_id)
+            
+            # 如果序列超过最大长度，保留最近的max_seq_len个交互
+            if len(user_seq[user_id]) > max_seq_len:
+                user_seq[user_id] = user_seq[user_id][-max_seq_len:]
+
+        # 对于序列长度不足max_seq_len的用户，使用-1进行填充
+        for user_id in user_seq:
+            if len(user_seq[user_id]) < max_seq_len:
+                # 在序列前面填充-1，使总长度达到max_seq_len
+                padding_length = max_seq_len - len(user_seq[user_id])
+                user_seq[user_id] = [-1] * padding_length + user_seq[user_id]
+                
+        print(f">>>> 构建了 {len(user_seq)} 个用户的历史交互序列")
+        return user_seq
+    
+    def generate_seq_samples(self, seq_len=10, num_negatives=1):
+        """
+        生成包含用户历史序列的BPR训练样本
+        
+        Args:
+            seq_len: 历史序列长度
+            num_negatives: 每个正样本对应的负样本数量
+            
+        Returns:
+            samples: 包含(user_id, history_seq, pos_item_id, neg_item_id)的列表，
+                    以及基模型预测结果
+        """
+        if self.data is None:
+            raise ValueError("请先加载数据")
+        samples = []
+        # 获取用户序列
+        user_seq = self.get_user_seq(max_seq_len=seq_len)  # 获取足够长的序列以便截取
+
+        # 按用户和时间戳分组
+        user_data = self.data.sort_values(['user_id', 'timestamp'])
+        
+        for user_id, group in tqdm(user_data.groupby('user_id'), desc=">>>> 生成序列样本"):
+            items = group['item_id'].tolist()
+            ratings = group['rating'].tolist()
+
+            # 获取用户历史序列
+            user_history = user_seq[user_id][:seq_len]
+            
+            # 对于每个交互,使用其之前的seq_len个交互作为历史序列
+            for i in range(1, len(items)):
+                item_id = items[i]
+                score = ratings[i]
+                interaction_idx = self.get_interaction_index(user_id, item_id)
+
+                # 获取当前交互的基模型预测结果
+                base_model_preds = None
+                if interaction_idx is not None:
+                    base_model_preds = self.base_model_preds[interaction_idx, :, :100]  # [k, 100]
+
+                samples.append((user_id, user_history, item_id, score, base_model_preds))
+
+        print(f">>>> 生成了 {len(samples)} 个序列感知样本")
+        return samples
+
+    def get_interaction_index(self, user_id, item_id):
+        """获取用户-物品交互在数据集中的索引"""
+        key = (user_id, item_id)
+        return self.interaction_indices.get(key, -1)
+
+
+class SeqBPRDataset(Dataset):
+    def __init__(self, samples, device):
+        """
+        初始化BPR数据集
+        
+        Args:
+            samples: 包含(user_id, seq_len, score, base_model_preds)四元组的列表
+            user_id: 形状为[batch_size]
+            seq_len: 形状为[batch_size, seq_len]
+            item: 形状为[batch_size]
+            score: 形状为[batch_size]
+            base_model_preds: 形状为[batch_size, k, 100]
+        """
+        self.users = [sample[0] for sample in samples]
+        self.histories = [sample[1] for sample in samples]
+        self.items = [sample[2] for sample in samples]
+        self.scores = [sample[3] for sample in samples]
+        self.base_model_preds = [sample[4] for sample in samples]
+        self.device = device
+
+    def __len__(self):
+        return len(self.users)
+
+    def __getitem__(self, idx):
+        return (
+            torch.tensor(self.users[idx], device=self.device), 
+            torch.tensor(self.histories[idx], device=self.device), 
+            torch.tensor(self.items[idx], device=self.device), 
+            torch.tensor(self.scores[idx], device=self.device), 
+            torch.tensor(self.base_model_preds[idx], device=self.device)
+        )

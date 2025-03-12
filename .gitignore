@@ -19,3 +19,10 @@ base_model_results.zip
 rec/.ipynb_checkpoints/main-checkpoint.py
 rec/config/.ipynb_checkpoints/seq_llm-checkpoint.yaml
 rec/bpr/__pycache__/*
+bpr/module/__pycache__/learn.cpython-310.pyc
+bpr/module/__pycache__/llm_cem.cpython-310.pyc
+score/module/__pycache__/learn.cpython-310.pyc
+score/module/__pycache__/llm_cem.cpython-310.pyc
+bpr/__pycache__/data.cpython-310.pyc
+bpr/__pycache__/model.cpython-310.pyc
+bpr/ckpt/*

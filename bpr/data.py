@@ -46,8 +46,10 @@ class BPRSampleGenerator:
             data_path: 数据文件路径
             sep: 数据分隔符
         """
-        # 加载数据
-        self.data = pd.read_csv(data_path, sep='::', header=None, engine='python')
+        if 'nrows' in self.args:
+            self.data = pd.read_csv(data_path, sep=self.args['sep'], header=None, engine='python', nrows=self.args['nrows'])
+        else:
+            self.data = pd.read_csv(data_path, sep=self.args['sep'], header=None, engine='python')
         self.data.columns = ['user', 'item', 'rating', 'timestamp']
 
         # 过滤评分
@@ -60,7 +62,7 @@ class BPRSampleGenerator:
         
         users_to_keep = user_counts[user_counts >= self.user_threshold].index
         items_to_keep = item_counts[item_counts >= self.item_threshold].index
-    
+
         self.data = self.data[self.data['user'].isin(users_to_keep)]
         self.data = self.data[self.data['item'].isin(items_to_keep)]
 
@@ -89,7 +91,7 @@ class BPRSampleGenerator:
         # 所有物品集合
         self.all_items = set(self.data['item_id'].unique())
         
-        print(f">>>> 数据加载完成: {len(self.data)} 条交互, {len(self.user_to_id)} 个用户, {len(self.item_to_id)} 个物品")
+        print(f">>>> 数据加载完成: {len(self.data)} 条交互, {self.n_user} 个用户, {self.n_item} 个物品")
 
         # 加载基模型的预测结果
         self.base_model_preds = []
@@ -110,6 +112,9 @@ class BPRSampleGenerator:
         self.item_to_id = {item: i for i, item in enumerate(unique_items)}
         self.id_to_user = {i: user for user, i in self.user_to_id.items()}
         self.id_to_item = {i: item for item, i in self.item_to_id.items()}
+
+        self.n_user = len(self.user_to_id)
+        self.n_item = len(self.item_to_id)
 
         # 添加ID列到数据中
         self.data['user_id'] = self.data['user'].map(self.user_to_id)
@@ -144,6 +149,13 @@ class BPRSampleGenerator:
             # 如果序列超过最大长度，保留最近的max_seq_len个交互
             if len(user_seq[user_id]) > max_seq_len:
                 user_seq[user_id] = user_seq[user_id][-max_seq_len:]
+
+        # 对于序列长度不足max_seq_len的用户，使用-1进行填充
+        for user_id in user_seq:
+            if len(user_seq[user_id]) < max_seq_len:
+                # 在序列前面填充-1，使总长度达到max_seq_len
+                padding_length = max_seq_len - len(user_seq[user_id])
+                user_seq[user_id] = [-1] * padding_length + user_seq[user_id]
                 
         print(f">>>> 构建了 {len(user_seq)} 个用户的历史交互序列")
         return user_seq
@@ -201,28 +213,31 @@ class BPRSampleGenerator:
         # 按用户和时间戳分组
         user_data = self.data.sort_values(['user_id', 'timestamp'])
         
-        for user_id, group in tqdm(user_data.groupby('user_id'), desc="生成序列样本"):
+        for user_id, group in tqdm(user_data.groupby('user_id'), desc=">>>> 生成序列样本"):
             items = group['item_id'].tolist()
+            
+            # 预先获取用户未交互物品列表,避免重复计算
+            neg_items = list(self.all_items - self.user_interacted_items[user_id])
+            if not neg_items:
+                continue
 
-            # 对于每个交互，使用其之前的seq_len个交互作为历史序列
+            # 获取用户历史序列
+            user_history = user_seq[user_id][:seq_len]
+            
+            # 对于每个交互,使用其之前的seq_len个交互作为历史序列
             for i in range(1, len(items)):
                 pos_item_id = items[i]
                 interaction_idx = self.get_interaction_index(user_id, pos_item_id)
 
                 # 获取当前交互的基模型预测结果
+                base_model_preds = None
                 if interaction_idx is not None:
                     base_model_preds = self.base_model_preds[interaction_idx, :, :100]  # [k, 100]
-                else:
-                    base_model_preds = None
 
                 # 为每个正样本采样负样本
-                for _ in range(num_negatives):
-                    neg_items = list(self.all_items - self.user_interacted_items[user_id])
-                    if not neg_items:
-                        continue
-
-                    neg_item_id = np.random.choice(neg_items)
-                    samples.append((user_id, user_seq[user_id][:seq_len], pos_item_id, neg_item_id, base_model_preds))
+                neg_item_ids = np.random.choice(neg_items, size=num_negatives, replace=False)
+                for neg_item_id in neg_item_ids:
+                    samples.append((user_id, user_history, pos_item_id, neg_item_id, base_model_preds))
 
         print(f">>>> 生成了 {len(samples)} 个序列感知BPR样本对")
         return samples
@@ -257,10 +272,10 @@ class BPRSampleGenerator:
                     neg_items = list(self.all_items - self.user_interacted_items[user_id])
                     if not neg_items:
                         continue
-                        
+
                     neg_item_id = np.random.choice(neg_items)
                     samples.append((user_id, pos_item_id, neg_item_id))
-        
+
         print(f">>>> 生成了 {len(samples)} 个时间感知BPR样本对")
         return samples
     
@@ -348,47 +363,37 @@ class BPRSampleGenerator:
         return self.interaction_indices.get(key, -1)
 
 
-class BPRDataset(Dataset):
-    def __init__(self, samples):
+class SeqBPRDataset(Dataset):
+    def __init__(self, samples, device):
         """
         初始化BPR数据集
         
         Args:
-            samples: 包含(user_id, pos_item_id, neg_item_id)三元组的列表
-        """
-        self.users = [sample[0] for sample in samples]
-        self.user_seq = [sample[1] for sample in samples]
-        self.pos_items = [sample[2] for sample in samples]
-        self.neg_items = [sample[3] for sample in samples]
-        self.base_model_preds = [sample[4] for sample in samples]
-
-    def __len__(self):
-        return len(self.users)
-
-    def __getitem__(self, idx):
-        return self.users[idx], self.user_seq[idx], self.pos_items[idx], self.neg_items[idx], self.base_model_preds[idx]
-
-
-class SeqBPRDataset(Dataset):
-    """序列感知的BPR数据集类，用于PyTorch DataLoader"""
-
-    def __init__(self, samples):
-        """
-        初始化序列感知的BPR数据集
-        
-        Args:
-            samples: 包含(user_id, history_seq, pos_item_id, neg_item_id)的列表
+            samples: 包含(user_id, seq_len, pos_item_id, neg_item_id, base_model_preds)五元组的列表
+            user_id: 形状为[batch_size]
+            seq_len: 形状为[batch_size, seq_len]
+            pos_item_id: 形状为[batch_size]
+            neg_item_id: 形状为[batch_size]
+            base_model_preds: 形状为[batch_size, k, 100]
         """
         self.users = [sample[0] for sample in samples]
         self.histories = [sample[1] for sample in samples]
         self.pos_items = [sample[2] for sample in samples]
         self.neg_items = [sample[3] for sample in samples]
+        self.base_model_preds = [sample[4] for sample in samples]
+        self.device = device
 
     def __len__(self):
         return len(self.users)
-    
+
     def __getitem__(self, idx):
-        return self.users[idx], self.histories[idx], self.pos_items[idx], self.neg_items[idx]
+        return (
+            torch.tensor(self.users[idx], device=self.device), 
+            torch.tensor(self.histories[idx], device=self.device), 
+            torch.tensor(self.pos_items[idx], device=self.device), 
+            torch.tensor(self.neg_items[idx], device=self.device), 
+            torch.tensor(self.base_model_preds[idx], device=self.device)
+        )
 
 
 class BPRLoss(nn.Module):
