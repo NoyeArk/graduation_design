@@ -15,7 +15,7 @@ data:
   num_negatives: 1
   user_threshold: 10
   item_threshold: 10
-  rating_threshold: 2
+  rating_threshold: 0
 
   base_model:
     - "acf"

@@ -159,7 +159,7 @@ if __name__ == '__main__':
     # 加载最佳模型
     # model.load_state_dict(torch.load(f"/root/autodl-tmp/ckpt/bpr_epoch1_batch90.pth"))
 
-    avg_ndcg = test(config, model, test_loader)
-    print(f"测试集上的平均NDCG@{config['topk']}: {avg_ndcg:.4f}")
+    # avg_ndcg = test(config, model, test_loader)
+    # print(f"测试集上的平均NDCG@{config['topk']}: {avg_ndcg:.4f}")
 
-    torch.save(model.state_dict(), f"score_ckpt/score_ndcg{avg_ndcg:.4f}.pth")
+    # torch.save(model.state_dict(), f"score_ckpt/score_ndcg{avg_ndcg:.4f}.pth")
