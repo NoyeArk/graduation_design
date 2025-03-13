@@ -59,8 +59,8 @@ def train(config, model, train_loader, optimizer):
                 train.global_step += 1
 
                 # 每训练5个batch保存一次模型
-                if (batch_idx + 1) % 10 == 0:
-                    torch.save(model.state_dict(), f"/root/autodl-tmp/ckpt/score_epoch{epoch+1}_batch{batch_idx+1}.pth")
+                if (batch_idx + 1) % 300 == 0:
+                    torch.save(model.state_dict(), f"/root/autodl-tmp/score_ckpt/score_epoch{epoch+1}_batch{batch_idx+1}.pth")
                     print(f"模型已保存: ckpt/score_epoch{epoch+1}_batch{batch_idx+1}.pth")
 
                     # avg_ndcg = test(config, model, test_loader)
@@ -71,37 +71,45 @@ def train(config, model, train_loader, optimizer):
 
 def test(config, model, test_loader):
     model.eval()
-    # 计算每个用户的NDCG@k
     with torch.no_grad():
         ndcg_scores = []
+
+        # 将测试集重置到初始状态
+        test_loader.dataset.dataset.reset()
         for batch in tqdm(test_loader, desc="计算测试集NDCG"):
             users, user_seq, items, scores, base_model_preds = batch
 
-            # 获取所有物品ID
-            all_item_ids = torch.arange(generator.num_items, device=config['model']['device'])
-            
-            # 分批处理所有物品
-            batch_size = config['batch_size']
-            all_scores = []
-            
-            for i in range(0, len(all_item_ids), batch_size):
-                # 获取当前批次的物品ID
-                batch_items = all_item_ids[i:i + batch_size]
-                
-                # 预测分数
-                batch_scores = model(users, user_seq, batch_items, base_model_preds)  # bc, 1
-                all_scores.append(batch_scores)
-
             # 对每个用户计算NDCG
             for user_idx in range(len(users)):
-                # 获取当前用户的预测分数
-                user_scores = all_scores[user_idx]
+                # 获取当前用户
+                user = users[user_idx:user_idx+1]
+                user_seq_i = user_seq[user_idx:user_idx+1]
+                base_model_preds_i = base_model_preds[user_idx:user_idx+1] if base_model_preds is not None else None
+
+                # 获取所有物品ID
+                all_item_ids = torch.arange(generator.n_item, device=config['model']['device'])
+                
+                all_scores = []
+                
+                for i in range(0, len(all_item_ids), config['batch_size']):
+                    batch_items = all_item_ids[i:i + config['batch_size']]
+                    cnt = len(batch_items)
+
+                    user_repeated = user.repeat(cnt)
+                    user_seq_repeated = user_seq_i.repeat(cnt, 1)
+                    base_model_preds_repeated = base_model_preds_i.repeat(cnt, 1, 1)
+                    # 预测分数
+                    batch_scores = model(user_repeated, user_seq_repeated, batch_items, base_model_preds_repeated)
+                    all_scores.append(batch_scores)
+
+                # 合并所有批次的分数
+                user_scores = torch.cat(all_scores, dim=0).squeeze()
                 
                 # 获取前k个物品
                 _, indices = torch.topk(user_scores, config['topk'])
-                
+
                 # 获取用户的实际交互物品
-                true_items = generator.user_interacted_items[users[user_idx].item()]
+                true_items = generator.user_interacted_items[user.item()]
 
                 # 计算DCG
                 dcg = 0
@@ -146,12 +154,12 @@ if __name__ == '__main__':
     model = SeqLearn(config['model'], config['data'], generator.n_user, generator.n_item)
     optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['lr'])
 
-    # train(config, model, train_loader, optimizer)
+    train(config, model, train_loader, optimizer)
 
     # 加载最佳模型
-    model.load_state_dict(torch.load(f"/root/autodl-tmp/ckpt/bpr_epoch1_batch90.pth"))
+    # model.load_state_dict(torch.load(f"/root/autodl-tmp/ckpt/bpr_epoch1_batch90.pth"))
 
     avg_ndcg = test(config, model, test_loader)
     print(f"测试集上的平均NDCG@{config['topk']}: {avg_ndcg:.4f}")
 
-    torch.save(model.state_dict(), f"ckpt/score_ndcg{avg_ndcg:.4f}.pth")
+    torch.save(model.state_dict(), f"score_ckpt/score_ndcg{avg_ndcg:.4f}.pth")

@@ -3,8 +3,8 @@ base_path: &base_path "/graduation_design/"
 topk: 10
 
 data:
-  train_valid_split: 0.7
-  nrows: 100000
+  train_valid_split: 0.9
+  # nrows: 100000
   maxlen: 30
   name: &dataset_name "ml-1m"
   sep: "::"
