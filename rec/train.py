@@ -24,6 +24,7 @@ class Pipeline(object):
     def train(self):
         MAP_valid = 0
         p = 0
+        best_metric = 0
 
         max_map, max_ndcg, max_prec = (0, 0), (0, 0), (0, 0)
         for epoch in range(0, self.epoch + 1):  # 每一次迭代训练
@@ -106,6 +107,10 @@ class Pipeline(object):
                 test_meta=self.meta_data.test_meta,
                 topk=[20, 50]
             )
+            
+            if best_metric < maps + ndcgs + recalls and epoch < self.epoch:
+                best_metric = maps + ndcgs + recalls
+                meta_result = self.save_meta_result()
 
             for topk in [20, 50]:
                 print(f"------> epoch {epoch} top{topk} map: {maps[topk]}, ndcg: {ndcgs[topk]}, prec: {recalls[topk]}")
@@ -121,7 +126,16 @@ class Pipeline(object):
             # max_ndcg = (max(max_ndcg[0], result_print[1]), max(max_ndcg[1], result_print[4]))
             # max_prec = (max(max_prec[0], result_print[2]), max(max_prec[1], result_print[5]))
 
-        self.model.save_model(f"D:/Code/graduation_design/ckpt/model.ckpt")
+        dir_name = f"../datasets/0314/{self.args['dataset']['name']}"
+        import os
+        if not os.path.isdir(dir_name):
+            os.makedirs(dir_name)
+        np.save(
+            f"../datasets/0314/{self.args['dataset']['name']}/{self.args['model']}.npy", 
+            meta_result
+        )
+
+        # self.model.save_model(f"D:/Code/graduation_design/ckpt/model.ckpt")
 
         # with open("./result.txt","a") as f:
         #     f.write("{},{},{},{},{},{},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f}\n".format(
@@ -144,6 +158,40 @@ class Pipeline(object):
         #         # result_print[4],
         #         # result_print[5]
         #     ))
+
+    def save_meta_result(self):
+        """
+        保存 meta-path 特征
+
+        Returns:
+            `np.ndarray`: 保存的结果
+        """
+        user_item_pairs = copy.deepcopy(self.data.dict_list['user_item'])
+        size = len(user_item_pairs)
+        num = 200
+
+        last_iteraction = []
+        for line in user_item_pairs:
+            user, item = line
+            last_iteraction.append(self.data.latest_interaction[(user, item)])
+        last_iteraction = np.array(last_iteraction)
+
+        # 计算 topk 得分
+        score = []
+        for i in range(int(size / num + 1)):
+            user_item_block = user_item_pairs[i*num: (i+1)*num]
+            last_iteraction_block = last_iteraction[i*num: (i+1)*num]
+            feedback_block = np.concatenate((user_item_block, last_iteraction_block), axis=1)
+            try:
+                score_block = self.model.topk(feedback_block, self.item_attributes)
+            except:
+                score_block = self.model.topk(feedback_block)
+
+            score_block = score_block[:, :100].tolist()
+            score.extend(score_block)
+
+        score = np.array(score,dtype=np.int64)
+        return np.concatenate((user_item_pairs, score), axis=1)
 
     def sample_negative(self, user_item_pairs, meta_data, negative_sample_count):
         """
@@ -181,13 +229,13 @@ class Pipeline(object):
                     if neg_item not in user_items:
                         sample_i[j] = neg_item
                         break
-                        
+
                 # 如果10次尝试后仍未找到负样本，使用一个可能的负样本
                 if sample_i[j] == 0 and len(user_items) < self.n_item:
                     # 找到一个用户未交互过的物品
                     candidate_items = np.setdiff1d(np.arange(self.n_item), list(user_items))
                     sample_i[j] = np.random.choice(candidate_items)
-            
+
             sample.append(sample_i)
 
         return np.stack(sample, axis=-1)
@@ -221,7 +269,7 @@ class Pipeline(object):
 
         Args:
             test (`np.ndarray`): 测试数据
-            test_meta (`np.ndarray`): 测试元数据
+            test_meta (`np.ndarray`): 测试元数据, # [n_samples, k, rank]
             topk (`list`): TopK 列表
 
         Returns:

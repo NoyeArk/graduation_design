@@ -1,11 +1,13 @@
-# base_path: &base_path "D:/Code/graduation_design/"
-base_path: &base_path "/graduation_design/"
+base_path: &base_path "D:/Code/graduation_design/"
+# base_path: &base_path "/graduation_design/"
 topk: 10
 
 data:
-  train_valid_split: 0.95
+  device: "cuda:0"
+  train_test_split: 0.99
+  base_model_topk: 100
   # nrows: 10000
-  maxlen: 30
+  maxlen: 20
   name: &dataset_name "ml-1m"
   sep: "::"
   item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "movies.dat"]
@@ -39,5 +41,7 @@ model:
   div_module: "cov"
   pretrain_llm: "bert-base-uncased"
 
-epoch: 1
+  path: !!python/object/apply:os.path.join [*base_path, "bpr/ckpt_sigmoid"]
+
+epoch: 10
 batch_size: 512

@@ -1,5 +1,5 @@
-# base_path: &base_path "D:/Code/graduation_design/"
-base_path: &base_path "/root/autodl-tmp/graduation_design/"
+base_path: &base_path "D:/Code/graduation_design/"
+# base_path: &base_path "/root/autodl-tmp/graduation_design/"
 
 data:
   maxlen: 20
@@ -29,6 +29,8 @@ model:
   hidden_dim: 32
   device: "cuda:0"
   optimizer: "AdamOptimizer"
+  user_module: "SAtt"
+  model_module: "dynamic"
 
   tradeoff: 2
   div_module: "cov"

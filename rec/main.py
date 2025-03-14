@@ -3,31 +3,32 @@ import yaml
 from train import Pipeline
 from data_utils import Data
 from meta_data import MetaData
-from model.seq_learn import SeqLearn
+# from model.seq_learn import SeqLearn
+from model.seq_ensemble import Model
 
 
 if __name__ == "__main__":
-    with open("config/seq_llm.yaml", 'r', encoding='utf-8') as f:
+    with open("config/seq_ensemble.yaml", 'r', encoding='utf-8') as f:
         config = yaml.unsafe_load(f)
     print(config)
 
     data = Data(config['data'], 0)
     meta_data = MetaData(config['meta'], data)
-    model = SeqLearn(config['model'], data) 
+    model = Model(config['model'], data, config['data']['maxlen'])
 
-    for name, param in model.named_parameters():
-        if name.startswith('cem.llm'):
-            param.requires_grad = False
+    # for name, param in model.named_parameters():
+    #     if name.startswith('cem.llm'):
+    #         param.requires_grad = False
 
-    # 计算可训练总参数量
-    total_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"可训练总参数量: {total_trainable_params:,}")
+    # # 计算可训练总参数量
+    # total_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    # print(f"可训练总参数量: {total_trainable_params:,}")
 
-    print("---------------------------")
-    # 查看每层可训练参数
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            print(f"层: {name}, 形状: {param.shape}, 可训练参数量: {param.numel()}, {param.requires_grad}")
+    # print("---------------------------")
+    # # 查看每层可训练参数
+    # for name, param in model.named_parameters():
+    #     if param.requires_grad:
+    #         print(f"层: {name}, 形状: {param.shape}, 可训练参数量: {param.numel()}, {param.requires_grad}")
 
     pipeline = Pipeline(config['train'], data, meta_data, model)
     pipeline.train()

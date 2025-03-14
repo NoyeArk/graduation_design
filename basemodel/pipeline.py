@@ -198,7 +198,7 @@ class Pipeline(object):
         评估TopK物品
 
         Args:
-            test (`list`): 测试集，包含用户和物品的二元组
+            test_set (`list`): 测试集，包含用户和物品的二元组
             topk (`int`): 评估的TopK值
 
         Returns:

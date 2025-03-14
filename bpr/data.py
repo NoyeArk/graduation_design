@@ -1,3 +1,4 @@
+import copy
 import torch
 import numpy as np
 import pandas as pd
@@ -7,7 +8,7 @@ from collections import defaultdict
 from torch.utils.data import Dataset
 
 
-class BPRSampleGenerator:
+class Data(Dataset):
     """
     贝叶斯个性化排序(BPR)样本生成器
     用于从用户-物品交互数据中构造正负样本对
@@ -38,10 +39,20 @@ class BPRSampleGenerator:
         self.item_threshold = args['item_threshold']
         self.load_data(args['path'])
 
+        # 划分训练集和测试集
+        split_index = int(len(self.data) * args['train_test_split'])
+        self.train_data = self.data[:split_index]
+        self.test_data = self.data[split_index:]
+
+        # [len(train_data) * num_negatives, dict[7]]
+        train_samples, test_samples = self.generate_samples(seq_len=args['maxlen'], num_negatives=args['num_negatives'])
+        self.train_dataset = SeqBPRDataset(train_samples, args['device'])
+        self.test_dataset = SeqBPRDataset(test_samples, args['device'], is_test=True)
+
     def load_data(self, data_path):
         """
         加载数据并进行预处理
-        
+
         Args:
             data_path: 数据文件路径
             sep: 数据分隔符
@@ -55,42 +66,31 @@ class BPRSampleGenerator:
         # 过滤评分
         if self.rating_threshold > 0:
             self.data = self.data[self.data['rating'] > self.rating_threshold]
-            
+
         # 过滤交互次数少于阈值的用户和物品
         user_counts = self.data['user'].value_counts()
         item_counts = self.data['item'].value_counts()
-        
+
         users_to_keep = user_counts[user_counts >= self.user_threshold].index
         items_to_keep = item_counts[item_counts >= self.item_threshold].index
 
         self.data = self.data[self.data['user'].isin(users_to_keep)]
         self.data = self.data[self.data['item'].isin(items_to_keep)]
 
-        # 重置索引
+        self.data = self.data.sort_values(['user', 'timestamp'])
         self.data = self.data.reset_index(drop=True)
 
         # 用户和物品ID映射（如果原始ID不是连续整数）
         self._create_id_mappings()
 
-        # 检查交互索引的范围
-        if self.interaction_indices:
-            min_idx = min(self.interaction_indices.values())
-            max_idx = max(self.interaction_indices.values()) 
-            print(f">>>> 交互索引范围: 最小值 = {min_idx}, 最大值 = {max_idx}")
-
-        # 按时间戳排序
-        self.data = self.data.sort_values('timestamp')
-
         # 构建用户交互字典
-        self.user_interacted_items = defaultdict(set)
+        self.user_interacted_items = defaultdict(list)
         for row in self.data.itertuples():
-            user_id = self.user_to_id[row.user]
-            item_id = self.item_to_id[row.item]
-            self.user_interacted_items[user_id].add(item_id)
+            self.user_interacted_items[row.user].append(row.item)
 
         # 所有物品集合
-        self.all_items = set(self.data['item_id'].unique())
-        
+        self.all_items = set(self.data['item'].unique())
+
         print(f">>>> 数据加载完成: {len(self.data)} 条交互, {self.n_user} 个用户, {self.n_item} 个物品")
 
         # 加载基模型的预测结果
@@ -123,78 +123,82 @@ class BPRSampleGenerator:
         # 添加交互索引映射
         self.interaction_indices = {}
         for idx, row in self.data.iterrows():
-            key = (row['user_id'], row['item_id'])
+            key = (row['user'], row['item'])
             self.interaction_indices[key] = idx
 
-    def get_user_seq(self, max_seq_len=50):
+    def label_positive(self):
         """
-        获取每个用户的历史交互序列
+        返回正样本得分的函数
+
+        Returns:
+            tuple: 包含用户-物品对和对应的得分
+        """
+        # 获取基础模型的数量
+        n_base_models = len(self.args['base_model'])
+        # 创建得分矩阵，形状为 [样本数, 基模型数]
+        pos_label = np.zeros([len(self.data), n_base_models])
+        # 获取真实 (Ground Truth) 物品 ID，扩展维度成 [batch, 1]
+        gt_item = np.expand_dims(self.data['item'].values, axis=1)
+
+        # 复制基模型预测的前 N 个排名结果，形状为 [batch, k, N]，k 是基模型数量，N 是考虑的排名数量
+        rank_chunk = copy.deepcopy(self.base_model_preds[:, :, 2:2+self.args['base_model_topk']])  # [batch, k, rank]
+
+        for k in range(n_base_models):
+            # 获取当前基模型的排名结果
+            rank_chunk_k = rank_chunk[:, k, :]
+            # 比较真实物品是否在排名中
+            is_item_in_rank = gt_item == rank_chunk_k
+            # 如果物品在排名中，计算得分 = 1 / (10 + 物品的排名位置)
+            pos_label[np.sum(is_item_in_rank, axis=1) > 0, k] = 1 / (10 + np.argwhere(is_item_in_rank)[:, 1])
+
+        # 对应的得分
+        return pos_label  # [n_sample, k]
+
+    def label_negative(self, neg_samples):
+        """
+        返回负样本得分的函数
 
         Args:
-            max_seq_len: 序列最大长度，默认为50
-            
-        Returns:
-            user_seq: 字典，键为用户ID，值为该用户按时间排序的交互物品ID列表
-        """
-        user_seq = defaultdict(list)
-        
-        # 按用户ID和时间戳排序
-        sorted_data = self.data.sort_values(['user_id', 'timestamp'])
-        
-        for row in sorted_data.itertuples():
-            user_id = row.user_id
-            item_id = row.item_id
-            user_seq[user_id].append(item_id)
-            
-            # 如果序列超过最大长度，保留最近的max_seq_len个交互
-            if len(user_seq[user_id]) > max_seq_len:
-                user_seq[user_id] = user_seq[user_id][-max_seq_len:]
+            neg_samples (`np.ndarray`): 负样本列表
 
-        # 对于序列长度不足max_seq_len的用户，使用-1进行填充
-        for user_id in user_seq:
-            if len(user_seq[user_id]) < max_seq_len:
-                # 在序列前面填充-1，使总长度达到max_seq_len
-                padding_length = max_seq_len - len(user_seq[user_id])
-                user_seq[user_id] = [-1] * padding_length + user_seq[user_id]
-                
-        print(f">>>> 构建了 {len(user_seq)} 个用户的历史交互序列")
-        return user_seq
-    
-    def generate_basic_samples(self, num_negatives=1):
+        Returns:
+            label (`np.ndarray`): 负样本得分
         """
-        生成基本的BPR训练样本
-        
+        n_base_models = len(self.args['base_model'])
+        neg_label = np.zeros([len(neg_samples), n_base_models])  # [n_sample * num_neg, k]
+        gt_item = np.expand_dims(neg_samples, axis=1)  # [n_sample * num_neg, 1]
+        rank_chunk = copy.deepcopy(self.base_model_preds[:,:,2:2+self.args['base_model_topk']]) #[batch,k,rank]
+
+        for k in range(n_base_models):
+            rank_chunk_k = rank_chunk[:, k, :]
+            torf = gt_item == rank_chunk_k
+            neg_label[np.sum(torf, axis=1) > 0, k] = 1 / (10 + np.argwhere(torf)[:, 1])
+
+        return neg_label
+
+    def all_item_score(self, dataset):
+        """
+        返回所有得分物品的函数
+
         Args:
-            num_negatives: 每个正样本对应的负样本数量
-            
-        Returns:
-            samples: 包含(user_id, pos_item_id, neg_item_id)三元组的列表
-        """
-        if self.data is None:
-            raise ValueError("请先加载数据")
-            
-        samples = []
-        for row in self.data.itertuples():
-            user_id = row.user_id
-            pos_item_id = row.item_id
-            
-            # 为每个正样本采样指定数量的负样本
-            for _ in range(num_negatives):
-                # 从用户未交互过的物品中随机选择一个作为负样本
-                neg_items = list(self.all_items - self.user_interacted_items[user_id])
-                if not neg_items:  # 如果用户交互了所有物品（极少见）
-                    continue
-                    
-                neg_item_id = np.random.choice(neg_items)
-                samples.append((user_id, pos_item_id, neg_item_id))
+            dataset (`np.ndarray`): 训练集或测试集, [n_samples, k, 2+rank]
 
-        print(f">>>> 生成了 {len(samples)} 个BPR样本对")
-        return samples
-    
-    def generate_seq_samples(self, seq_len=10, num_negatives=1):
+        Returns:
+            u_k_i (`np.ndarray`): 所有得分, [n_samples, k, n_item]
+        """
+        rank_chunk = dataset[:,:,2:2+self.args['base_model_topk']]  # [batch, k, rank]
+        n_samples, k, topk = rank_chunk.shape  # [batch, k, rank]
+        rank_chunk_reshape = np.reshape(rank_chunk, [-1, topk])
+
+        u_k_i = np.zeros([n_samples * k, self.n_item], dtype=np.int32)  # [batch, k, n_item]
+        for i in range(topk):
+            u_k_i[np.arange(len(u_k_i)), rank_chunk_reshape[:, i]] = 1 / (i + 10)
+        return np.reshape(u_k_i, [n_samples, k, self.n_item])
+
+    def generate_samples(self, seq_len=10, num_negatives=1):
         """
         生成包含用户历史序列的BPR训练样本
-        
+
         Args:
             seq_len: 历史序列长度
             num_negatives: 每个正样本对应的负样本数量
@@ -203,168 +207,87 @@ class BPRSampleGenerator:
             samples: 包含(user_id, history_seq, pos_item_id, neg_item_id)的列表，
                     以及基模型预测结果
         """
-        if self.data is None:
-            raise ValueError("请先加载数据")
-            
-        samples = []
-        # 获取用户序列
-        user_seq = self.get_user_seq(max_seq_len=seq_len)  # 获取足够长的序列以便截取
+        user_item_pairs = []  # [n_sample, 2]
+        user_seq = []  # [n_sample, seq_len]
+        pos_labels = self.label_positive()  # [n_sample, k]
+        neg_labels = []  # [n_sample * num_negatives, k]
+        base_model_preds = []  # [n_sample, k, 100]
+        neg_samples = []  # [n_sample * num_negatives]
 
-        # 按用户和时间戳分组
-        user_data = self.data.sort_values(['user_id', 'timestamp'])
-        
-        for user_id, group in tqdm(user_data.groupby('user_id'), desc=">>>> 生成序列样本"):
-            items = group['item_id'].tolist()
-            
+        user_data = self.data.sort_values(['user', 'timestamp'])
+
+        for user, group in tqdm(user_data.groupby('user'), desc=">>>> 采样负样本"):
+            items = group['item'].tolist()  # 获取原始item id
+
             # 预先获取用户未交互物品列表,避免重复计算
-            neg_items = list(self.all_items - self.user_interacted_items[user_id])
+            neg_items = list(self.all_items - set(self.user_interacted_items[user]))
             if not neg_items:
                 continue
 
-            # 获取用户历史序列
-            user_history = user_seq[user_id][:seq_len]
-            
-            # 对于每个交互,使用其之前的seq_len个交互作为历史序列
-            for i in range(1, len(items)):
-                pos_item_id = items[i]
-                interaction_idx = self.get_interaction_index(user_id, pos_item_id)
+            for item in items:
+                user_item_pairs.append([user, item])
 
-                # 获取当前交互的基模型预测结果
-                base_model_preds = None
-                if interaction_idx is not None:
-                    base_model_preds = self.base_model_preds[interaction_idx, :, :100]  # [k, 100]
+                # 获取用户交互过的item之前的seq_len个交互作为历史序列
+                item_idx = items.index(item)
+                user_history = items[max(0, item_idx - seq_len):item_idx]
+
+                # 如果历史序列长度不足seq_len，则在前面填充-1
+                if len(user_history) < seq_len:
+                    user_history = user_history + [-1] * (seq_len - len(user_history))
+                user_seq.append(user_history)
+
+                interaction_idx = self.get_interaction_index(user, item)
+                assert (self.base_model_preds[interaction_idx, :, :2] == (self.user_to_id[user], self.item_to_id[item])).all()
+                base_model_preds.append(self.base_model_preds[interaction_idx, :, :seq_len])  # [k, seq_len]
 
                 # 为每个正样本采样负样本
-                neg_item_ids = np.random.choice(neg_items, size=num_negatives, replace=False)
-                for neg_item_id in neg_item_ids:
-                    samples.append((user_id, user_history, pos_item_id, neg_item_id, base_model_preds))
+                neg_items = np.random.choice(neg_items, size=num_negatives, replace=False)
+                for neg_item in neg_items:
+                    neg_samples.append(neg_item)
 
-        print(f">>>> 生成了 {len(samples)} 个序列感知BPR样本对")
-        return samples
+        neg_labels = self.label_negative(neg_samples)
 
-    def generate_time_aware_samples(self, num_negatives=1):
-        """
-        生成时间感知的BPR训练样本
-        
-        Args:
-            num_negatives: 每个正样本对应的负样本数量
-            
-        Returns:
-            samples: 包含(user_id, pos_item_id, neg_item_id)三元组的列表
-        """
-        if self.data is None:
-            raise ValueError("请先加载数据")
-            
-        samples = []
-        # 按用户和时间戳分组
-        user_data = self.data.sort_values(['user_id', 'timestamp'])
-        
-        for user_id, group in user_data.groupby('user_id'):
-            items = group['item_id'].tolist()
-            timestamps = group['timestamp'].tolist()
-            
-            # 使用较新的交互作为正样本
-            for i in range(len(items)):
-                pos_item_id = items[i]
-                
-                # 为每个正样本采样负样本
-                for _ in range(num_negatives):
-                    neg_items = list(self.all_items - self.user_interacted_items[user_id])
-                    if not neg_items:
-                        continue
+        train_samples = []
+        train_size = int(len(user_item_pairs) * self.args['train_test_split'])
+        test_size = len(user_item_pairs) - train_size
 
-                    neg_item_id = np.random.choice(neg_items)
-                    samples.append((user_id, pos_item_id, neg_item_id))
+        for i in tqdm(range(train_size), desc=">>>> 构建训练集"):
+            train_samples.append({
+                'user_id': self.user_to_id[user_item_pairs[i][0]],  # 用户ID（映射后）
+                'history_seq': user_seq[i],  # [seq_len]
+                'pos_item': user_item_pairs[i][1],  # 正样本
+                'neg_item': neg_samples[i],  # 负样本
+                'pos_label': pos_labels[i],  # [k]
+                'neg_label': neg_labels[i],  # [k]
+                'base_model_preds': base_model_preds[i]  # [k, 100]
+            })
+        print(f">>>> 生成了 {len(train_samples)} 个训练样本")
 
-        print(f">>>> 生成了 {len(samples)} 个时间感知BPR样本对")
-        return samples
-    
-    def generate_rating_aware_samples(self, num_negatives=1, top_n=5):
-        """
-        生成评分感知的BPR训练样本
-        
-        Args:
-            num_negatives: 每个正样本对应的负样本数量
-            top_n: 每个用户选取评分最高的前N个物品作为正样本
-            
-        Returns:
-            samples: 包含(user_id, pos_item_id, neg_item_id)三元组的列表
-        """
-        if self.data is None:
-            raise ValueError("请先加载数据")
+        test_samples = []
+        base_model_preds_test = self.base_model_preds[-test_size:]
+        all_scores = self.all_item_score(base_model_preds_test)
 
-        samples = []
-        
-        # 按评分降序排列
-        user_data = self.data.sort_values(['user_id', 'rating'], ascending=[True, False])
-        
-        for user_id, group in user_data.groupby('user_id'):
-            # 获取用户评分最高的几个物品作为正样本
-            top_items = group['item_id'].tolist()[:top_n]
-            
-            for pos_item_id in top_items:
-                # 为每个正样本采样负样本
-                for _ in range(num_negatives):
-                    neg_items = list(self.all_items - self.user_interacted_items[user_id])
-                    if not neg_items:
-                        continue
-                        
-                    neg_item_id = np.random.choice(neg_items)
-                    samples.append((user_id, pos_item_id, neg_item_id))
-        
-        print(f">>>> 生成了 {len(samples)} 个评分感知BPR样本对")
-        return samples
-    
-    def generate_hard_negative_samples(self, model, num_negatives=1, num_candidates=10):
-        """
-        生成难负样本的BPR训练样本
-        
-        Args:
-            model: 推荐模型，需要有predict(user_id, item_id)方法
-            num_negatives: 每个正样本对应的负样本数量
-            num_candidates: 候选负样本数量
-            
-        Returns:
-            samples: 包含(user_id, pos_item_id, neg_item_id)三元组的列表
-        """
-        if self.data is None:
-            raise ValueError("请先加载数据")
-            
-        samples = []
-        
-        for row in self.data.itertuples():
-            user_id = row.user_id
-            pos_item_id = row.item_id
-            
-            # 为每个正样本采样多个候选负样本
-            neg_items = list(self.all_items - self.user_interacted_items[user_id])
-            if len(neg_items) < num_candidates:
-                continue
-                
-            # 随机选择一些候选负样本
-            candidates = np.random.choice(neg_items, num_candidates, replace=False)
-            
-            # 计算模型对这些候选的预测分数
-            candidate_scores = [model.predict(user_id, item_id) for item_id in candidates]
-            
-            # 选择得分最高的几个作为难负样本
-            sorted_indices = np.argsort(candidate_scores)[::-1]  # 降序排列
-            hard_negatives = [candidates[i] for i in sorted_indices[:num_negatives]]
-            
-            for neg_item_id in hard_negatives:
-                samples.append((user_id, pos_item_id, neg_item_id))
+        for j in tqdm(range(train_size, len(user_item_pairs)), desc=">>>> 构建测试集"):
+            test_samples.append({
+                'user_id': self.user_to_id[user_item_pairs[j][0]],  # 用户ID（映射后）
+                'history_seq': user_seq[j],  # [seq_len]
+                'pos_item': user_item_pairs[j][1],  # 正样本
+                'neg_item': neg_samples[j],  # 负样本
+                'all_item_scores': all_scores[j - train_size],  # [k, all_items]
+                'base_model_preds': base_model_preds[j]  # [k, 100]
+            })
+        print(f">>>> 生成了 {len(test_samples)} 个测试样本")
 
-        print(f">>>> 生成了 {len(samples)} 个难负样本BPR样本对")
-        return samples
+        return train_samples, test_samples
 
-    def get_interaction_index(self, user_id, item_id):
+    def get_interaction_index(self, user, item):
         """获取用户-物品交互在数据集中的索引"""
-        key = (user_id, item_id)
+        key = (user, item)
         return self.interaction_indices.get(key, -1)
 
 
 class SeqBPRDataset(Dataset):
-    def __init__(self, samples, device):
+    def __init__(self, samples, device, is_test=False):
         """
         初始化BPR数据集
         
@@ -374,38 +297,58 @@ class SeqBPRDataset(Dataset):
             seq_len: 形状为[batch_size, seq_len]
             pos_item_id: 形状为[batch_size]
             neg_item_id: 形状为[batch_size]
+            pos_label: 形状为[batch_size, k]
+            neg_label: 形状为[batch_size, k]
             base_model_preds: 形状为[batch_size, k, 100]
         """
-        self.users = [sample[0] for sample in samples]
-        self.histories = [sample[1] for sample in samples]
-        self.pos_items = [sample[2] for sample in samples]
-        self.neg_items = [sample[3] for sample in samples]
-        self.base_model_preds = [sample[4] for sample in samples]
+        self.users = [sample['user_id'] for sample in samples]
+        self.histories = [sample['history_seq'] for sample in samples]
+        self.pos_items = [sample['pos_item'] for sample in samples]
+        self.neg_items = [sample['neg_item'] for sample in samples]
+        if not is_test:
+            self.pos_labels = [sample['pos_label'] for sample in samples]
+            self.neg_labels = [sample['neg_label'] for sample in samples]
+        else:
+            self.all_item_scores = [sample['all_item_scores'] for sample in samples]
+        self.base_model_preds = [sample['base_model_preds'] for sample in samples]
+
         self.device = device
+        self.is_test = is_test
 
     def __len__(self):
         return len(self.users)
 
     def __getitem__(self, idx):
+        if not self.is_test:
+            return (
+                torch.tensor(self.users[idx], device=self.device),
+                torch.tensor(self.histories[idx], device=self.device),
+                torch.tensor(self.pos_items[idx], device=self.device),
+                torch.tensor(self.neg_items[idx], device=self.device),
+                torch.tensor(self.pos_labels[idx], device=self.device),
+                torch.tensor(self.neg_labels[idx], device=self.device),
+                torch.tensor(self.base_model_preds[idx], device=self.device)
+            )
         return (
-            torch.tensor(self.users[idx], device=self.device), 
-            torch.tensor(self.histories[idx], device=self.device), 
-            torch.tensor(self.pos_items[idx], device=self.device), 
-            torch.tensor(self.neg_items[idx], device=self.device), 
+            torch.tensor(self.users[idx], device=self.device),
+            torch.tensor(self.histories[idx], device=self.device),
+            torch.tensor(self.pos_items[idx], device=self.device),
+            torch.tensor(self.neg_items[idx], device=self.device),
+            torch.tensor(self.all_item_scores[idx], device=self.device),
             torch.tensor(self.base_model_preds[idx], device=self.device)
         )
 
 
 class BPRLoss(nn.Module):
     """BPR损失函数实现"""
-    
+
     def __init__(self):
         super(BPRLoss, self).__init__()
-        
+
     def forward(self, pos_scores, neg_scores):
         """
         计算BPR损失
-        
+
         Args:
             pos_scores: 正样本得分，形状为 [batch_size]
             neg_scores: 负样本得分，形状为 [batch_size]
@@ -413,5 +356,5 @@ class BPRLoss(nn.Module):
         Returns:
             loss: BPR损失值
         """
-        loss = -torch.mean(torch.log(torch.sigmoid(pos_scores - neg_scores)))
+        loss = -torch.sum(torch.log(torch.sigmoid(pos_scores - neg_scores)))
         return loss

@@ -3,11 +3,15 @@ import toolz
 import argparse
 import numpy as np
 from tqdm import tqdm
+
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
-from utils import *
-from rec.data_utils import Data
+from data_utils import Data
+from module.utils import *
+
+# gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
+# tf.config.experimental.set_visible_devices(devices=gpus[0], device_type='GPU')
 
 N = 100  # 这个N是为了取前多少个items的score，大于N的设为0.
 
@@ -49,7 +53,7 @@ class Model(object):
     """
     模型类
     """
-    def __init__(self, args, data, hidden_factor, learning_rate, lamda_bilinear, optimizer_type):
+    def __init__(self, args, data, max_len):
         """
         初始化模型
 
@@ -65,12 +69,12 @@ class Model(object):
         self.data = data
         self.n_user = self.data.entity_num['user']
         self.n_item = self.data.entity_num['item']
-        self.learning_rate = learning_rate
-        self.hidden_factor = hidden_factor
-        self.lamda_bilinear = lamda_bilinear
-        self.optimizer_type = optimizer_type
+        self.learning_rate = args['lr']
+        self.hidden_factor = args['hidden_dim']
+        self.lamda_bilinear = args['lamda']
+        self.optimizer_type = args['optimizer']
         self.n_base_model = len(base_models)
-        self.seq_max_len = self.args.maxlen
+        self.seq_max_len = max_len
 
         # 初始化 prediction 属性
         self.prediction = None
@@ -81,7 +85,7 @@ class Model(object):
         """
         初始化 tensorflow 图。
         """
-        tf.reset_default_graph()  # 重置默认图
+        # tf.reset_default_graph()  # 重置默认图
         self.graph = tf.Graph()
 
         with self.graph.as_default():  # , tf.device('/cpu:0'):
@@ -112,14 +116,14 @@ class Model(object):
             self.condition = tf.to_float(tf.greater(tf.reduce_sum(self.meta_pos, axis=1), 0))
 
             # 对用户进行注意力建模
-            if self.args.user_module == 'MC':
+            if self.args['user_module'] == 'MC':
                 self.item_sequence_embs = tf.nn.embedding_lookup(
                     self.weights['item_embeddings1'],
                     self.input_seq
                 )  # [none, p, d]
                 self.preference = self.user_embed + tf.reduce_sum(self.item_sequence_embs,axis=1)
                 self.items_embs = self.weights['item_embeddings1']
-            elif self.args.user_module == 'GRU':
+            elif self.args['user_module'] == 'GRU':
                 self.item_sequence_embs = tf.nn.embedding_lookup(
                     self.weights['item_embeddings1'],
                     self.input_seq
@@ -132,7 +136,7 @@ class Model(object):
                 )  # [none, 5, d]
                 self.preference = value[:,-1,:] + self.user_embed #[none,d]
                 self.items_embs = self.weights['item_embeddings1']
-            elif self.args.user_module == 'LSTM':
+            elif self.args['user_module'] == 'LSTM':
                 self.item_sequence_embs = tf.nn.embedding_lookup(
                     self.weights['item_embeddings1'],
                     self.input_seq
@@ -145,20 +149,20 @@ class Model(object):
                 )  # [none, 5, d]
                 self.preference = value[:, -1, :] + self.user_embed  # [none,d]
                 self.items_embs = self.weights['item_embeddings1']
-            elif self.args.user_module == 'SAtt':
+            elif self.args['user_module'] == 'SAtt':
                 self.state = self.FFN(self.input_seq)
                 self.preference = self.state[:, -1, :] + self.user_embed  # [none,d]
                 self.items_embs = self.item_emb_table
-            elif self.args.user_module == 'DIEN':
+            elif self.args['user_module'] == 'DIEN':
                 self.state = self.dien_with_self_attention(self.input_seq)
                 self.preference = self.state[:,-1,:] + self.user_embed  # [none,d]
                 self.items_embs = self.item_emb_table
-            elif self.args.user_module == 'static':
+            elif self.args['user_module'] == 'static':
                 self.preference = self.user_embed
                 self.items_embs = self.weights['item_embeddings1']
 
             # 对基模型进行注意力建模
-            if self.args.model_module == 'dynamic':
+            if self.args['model_module'] == 'dynamic':
                 self.each_model_emb = tf.nn.embedding_lookup(
                     self.items_embs,
                     self.base_model_focus
@@ -178,7 +182,7 @@ class Model(object):
                     self.wgt_model * self.each_model_emb,
                     axis=2
                 )  # [none, k, d]
-            elif self.args.model_module == 'static':
+            elif self.args['model_module'] == 'static':
                 self.basemodel_emb = self.weights['base_model_embeddings']  # [1, k, d]
 
             # 计算每个基模型的权重
@@ -202,7 +206,7 @@ class Model(object):
                 self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)
 
             # 计算多样性损失
-            if self.args.div_module == 'AEM-cov':
+            if self.args['div_module'] == 'AEM-cov':
                 # AEM diversity
                 self.model_emb =  self.basemodel_emb#[none,k,p]
                 cov_idx = tf.constant(
@@ -218,7 +222,7 @@ class Model(object):
                 l2 = tf.reduce_sum(self.model_emb ** 2, axis=-1)  # none * k
                 cov_div2 = tf.matmul(tf.expand_dims(l2, axis=-1), tf.expand_dims(l2, axis=1))  # none* k *k
                 self.cov = cov_div1 / cov_div2  # [none, k, k]
-            elif self.args.div_module == 'cov':
+            elif self.args['div_module'] == 'cov':
                 self.model_emb =  self.basemodel_emb#[none,k,p]
                 cov_wgt = tf.stop_gradient(
                     tf.expand_dims(self.wgts, axis=1) + tf.expand_dims(self.wgts ,axis=2)
@@ -230,7 +234,7 @@ class Model(object):
                 self.cov = self.cov * coff
 
             # 计算多样性损失
-            self.loss_diversity = -self.args.tradeoff * tf.reduce_sum(self.cov)
+            self.loss_diversity = -self.args['tradeoff'] * tf.reduce_sum(self.cov)
             self.loss = self.loss_rec + self.loss_reg + self.loss_diversity
 
             # 选择优化器
@@ -251,7 +255,7 @@ class Model(object):
             out = tf.reduce_sum(
                 tf.expand_dims(self.wgts, axis=2) * self.meta_all_items,
                 axis=1
-            )  #[none, n_item]
+            )  # [none, n_item]
             self.out_all_topk = tf.nn.top_k(out, 200)
 
             # 初始化 saver
@@ -507,17 +511,16 @@ class Model(object):
         reuse = tf.AUTO_REUSE
         with tf.variable_scope("SASRec", reuse=reuse):
             # sequence embedding, item embedding table
-            self.seq, item_emb_table = embedding(
-                input_seq_masked,  # 使用处理后的序列
-                vocab_size=self.n_item + 1,  # 词汇表大小加1，为填充标记预留空间
-                num_units=self.hidden_factor,
-                zero_pad=True,
-                scale=True,
-                l2_reg=self.lamda_bilinear,
-                scope="input_embeddings",
-                with_t=True,
-                reuse=reuse
-            )
+            self.seq, item_emb_table = embedding(input_seq,
+                                                 vocab_size=self.n_item + 1, #error?
+                                                 num_units=self.hidden_factor,
+                                                 zero_pad=True,
+                                                 scale=True,
+                                                 l2_reg=self.lamda_bilinear,
+                                                 scope="input_embeddings",
+                                                 with_t=True,
+                                                 reuse=reuse
+                                                 )
             self.item_emb_table = item_emb_table[1:]
 
             # Positional Encoding
@@ -1153,3 +1156,25 @@ def sem_main(
     meta_data = MetaData(args, data)
     session_DHRec = Train_MF(args, data, meta_data)
     session_DHRec.train()
+
+
+if __name__ == "__main__":
+    factor = 32
+    seed = 0          
+    # Gems 2048                               
+    batch_size = {'Amazon_App':1024,'Kindle':1024,'Clothing':2048,'Grocery':2048,'Instant_Video':256,'Games':1024, 'ml-1m':512}
+    tradeoff = {'Amazon_App':1,'Clothing':2,'Grocery':128,'Kindle':128,'Instant_Video':2,'Games':32, 'ml-1m':2}
+    epoch = {'Amazon_App':15,'Kindle':5,'Clothing':10,'Grocery':20,'Instant_Video':20,'Games':10, 'ml-1m':10}
+    maxlen = {'Amazon_App':5,'Kindle':3,'Clothing':3,'Grocery':5,'Instant_Video':5,'Games':5, 'ml-1m':20}
+
+    #Setting for the proposed method and the ablations.
+    #method_name:tradeoff,user_module,model_module,div_module.
+    #SEM:tradeoff[data],'SAtt','dynamic','cov'.
+    #w/o uDC:tradeoff[data],'static','dynamic','cov'.
+    #w/o bDE:tradeoff[data],'SAtt','static','cov'.
+    #w/o Div:0.0,'SAtt','dynamic','cov'.
+    #w/o TPDiv:tradeoff[data],'SAtt','dynamic','AEM-cov'.
+
+    #example:
+    data = 'ml-1m'
+    sem_main(data,factor,batch_size[data], tradeoff[data],'SAtt','dynamic','cov',epoch[data],maxlen[data])

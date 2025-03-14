@@ -32,7 +32,7 @@ class MetaData(object):
         self.test_meta = meta[[
             self.user_item_pairs_to_index[line[0], line[1]]
             for line in self.data.test_set
-        ]]
+        ]]  # [n_samples, k, rank]
 
         # 返回对于 ensemble 的训练集和 basemodel 值
         self.user_item_pairs, self.user_item_pairs_labels = self.label_positive()
@@ -40,24 +40,24 @@ class MetaData(object):
         # 初始化 users 属性
         self.users = None
 
-    def all_score(self, traintest):
+    def all_score(self, dataset):
         """
         返回所有得分的函数
 
         Args:
-            traintest (`np.ndarray`): 训练集或测试集
+            dataset (`np.ndarray`): 训练集或测试集, [n_samples, k, 2+rank]
 
         Returns:
             u_k_i (`np.ndarray`): 所有得分
         """
-        rank_chunk = traintest[:,:,2:2+self.top_k_items] #[batch,k,rank]
-        btch, k, n = rank_chunk.shape  # [batch, k, rank]
-        rank_chunk_reshape = np.reshape(rank_chunk, [-1, n])
+        rank_chunk = dataset[:,:,2:2+self.top_k_items]  # [batch, k, rank]
+        n_samples, k, topk = rank_chunk.shape  # [batch, k, rank]
+        rank_chunk_reshape = np.reshape(rank_chunk, [-1, topk])
 
-        u_k_i = np.zeros([btch*k, self.n_item])     #[batch,k,n_item]
-        for i in range(n):
-            u_k_i[np.arange(len(u_k_i)), rank_chunk_reshape[:,i]] = 1 / (i + 10)
-        return np.reshape(u_k_i, [btch, k, self.n_item])
+        u_k_i = np.zeros([n_samples * k, self.n_item])  # [batch, k, n_item]
+        for i in range(topk):
+            u_k_i[np.arange(len(u_k_i)), rank_chunk_reshape[:, i]] = 1 / (i + 10)
+        return np.reshape(u_k_i, [n_samples, k, self.n_item])
 
     def label_positive(self):
         """
@@ -78,7 +78,7 @@ class MetaData(object):
         gt_item = np.expand_dims(self.train_meta[:, 0, 1], axis=1)
 
         # 复制基模型预测的前 N 个排名结果，形状为 [batch, k, N]，k 是基模型数量，N 是考虑的排名数量
-        rank_chunk = copy.deepcopy(self.train_meta[:, :, 2: 2+self.top_k_items])  # [batch, k, rank]
+        rank_chunk = copy.deepcopy(self.train_meta[:, :, 2:2+self.top_k_items])  # [batch, k, rank]
 
         for k in range(n_base_models):
             # 获取当前基模型的排名结果
@@ -109,10 +109,11 @@ class MetaData(object):
         for i in range(NG):
             label_i = np.zeros([len(self.train_meta), n_k])
             GT_item = np.expand_dims(neglist[:,i],axis=1)#[batch,1] #for item
-            rank_chunk = copy.deepcopy(self.train_meta[:,:,2:2+self.top_k_items]) #[batch,k,rank]       
+            rank_chunk = copy.deepcopy(self.train_meta[:,:,2:2+self.top_k_items]) #[batch,k,rank]
             for k in range(n_k):
                 rank_chunk_k = rank_chunk[:, k, :]
                 torf = GT_item == rank_chunk_k
                 label_i[np.sum(torf,axis=1)>0,k] = 1 / (10+ np.argwhere(torf)[:,1])
             label.append(label_i)
+
         return np.stack(label, axis=1)

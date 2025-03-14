@@ -128,7 +128,7 @@ class Caser(object):
             elif self.optimizer_type == 'MomentumOptimizer':
                 self.optimizer = tf.train.MomentumOptimizer(learning_rate=self.learning_rate, momentum=0.95).minimize(self.loss)
 
-            self.out_all_topk = tf.nn.top_k(self.test_pred,200)
+            self.out_all_topk = tf.nn.top_k(self.test_pred, 200)
             self.trainable = tf.trainable_variables()
             # init
             self.sess = self._init_session()

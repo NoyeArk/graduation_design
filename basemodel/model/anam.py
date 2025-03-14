@@ -64,7 +64,7 @@ class ANAM(object):
             self.item_charactor_5 = tf.nn.embedding_lookup(self.weights['I'],self.users_p5_idx)[:,1:,:]##[none,4,d]             
             self.out_p5 = tf.reduce_sum(self.user_preference_p5*self.item_charactor_5,axis=-1)#none*1
 
-            self.out = tf.reduce_sum(self.user_preference*self.item_charactor,axis=1,keep_dims = True)#none*1
+            self.out = tf.reduce_sum(self.user_preference * self.item_charactor, axis=1, keep_dims = True)#none*1
 
 #            self.loss_rec = tf.nn.l2_loss(tf.reduce_sum(self.out,axis=1,keep_dims=True)-self.labels)
 #            self.loss_rec = self.pairwise_loss(self.out,self.labels)\
@@ -75,7 +75,7 @@ class ANAM(object):
           
             self.loss_reg = 0
             for wgt in tf.trainable_variables():
-                self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)      
+                self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)
 
             self.loss = self.loss_rec + self.loss_reg 
             # Optimizer.
@@ -85,7 +85,7 @@ class ANAM(object):
 
             preference = self.user_preference
 
-            out = tf.matmul(preference,self.weights['I'],transpose_b = True)#[none ,all]
+            out = tf.matmul(preference, self.weights['I'], transpose_b = True)#[none ,all]
             self.out_all_topk = tf.nn.top_k(out,1000)
             # init
             self.sess = self._init_session()

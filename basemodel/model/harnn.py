@@ -57,13 +57,13 @@ class HARNN(object):
             value, self.preference = tf.nn.dynamic_rnn(lstmCell, self.sequence, dtype=tf.float32)#[none,5,d]
             self.preference = value
   
-            self.item_pos = tf.nn.embedding_lookup(self.unified_item,self.target_items)#none *5* d
-            self.item_neg = tf.nn.embedding_lookup(self.unified_item,self.neg_items)#none *5*d
+            self.item_pos = tf.nn.embedding_lookup(self.unified_item, self.target_items)#none *5* d
+            self.item_neg = tf.nn.embedding_lookup(self.unified_item, self.neg_items)#none *5*d
 
-            self.out_pos = tf.reduce_sum( self.preference * self.item_pos,axis=-1,keep_dims=True)#none * 1  
-            self.out_neg = tf.reduce_sum( self.preference * self.item_neg,axis=-1,keep_dims=True)#none * 1  
+            self.out_pos = tf.reduce_sum( self.preference * self.item_pos, axis=-1,keep_dims=True)#none * 1  
+            self.out_neg = tf.reduce_sum( self.preference * self.item_neg, axis=-1,keep_dims=True)#none * 1  
 
-            self.loss_rec = -tf.reduce_sum(tf.log(tf.sigmoid(self.out_pos))+tf.log(tf.sigmoid(1- self.out_neg)))
+            self.loss_rec = -tf.reduce_sum(tf.log(tf.sigmoid(self.out_pos)) + tf.log(tf.sigmoid(1- self.out_neg)))
 
             self.loss_reg = 0
             for wgt in tf.trainable_variables():
@@ -84,7 +84,7 @@ class HARNN(object):
                 self.optimizer = tf.train.AdagradOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
 
             user_embs = self.preference[:,-1,:]#none*k            
-            out = tf.matmul(user_embs, self.unified_item,transpose_b=True)
+            out = tf.matmul(user_embs, self.unified_item, transpose_b=True)
             self.out_all_topk = tf.nn.top_k(out,200)
 
             # init
@@ -99,7 +99,7 @@ class HARNN(object):
         config.gpu_options.per_process_gpu_memory_fraction = 0.9
         config.allow_soft_placement = True
         return tf.Session(config=config)
-    
+
     def _initialize_weights(self):
         all_weights = dict()
         

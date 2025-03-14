@@ -1,6 +1,6 @@
 seed: 0
 neighbor_cnt: 5
-model: "acf"
+model: "anam"
 
 lamda:
   acf: 0.001

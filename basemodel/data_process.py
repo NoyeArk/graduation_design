@@ -7,7 +7,7 @@ import codecs
 from tqdm import tqdm
 
 leave_num = 1000000000
-remove_rating = 2
+remove_rating = 0
 last = 5  # 5 for BMS; 10 for SNR
 
 

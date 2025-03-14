@@ -58,8 +58,13 @@ class SeqLearn(nn.Module):
         self.layer_norm2 = nn.LayerNorm(self.hidden_dim)
         self.augru = nn.GRU(self.hidden_dim, self.hidden_dim, batch_first=True)
 
-        self.score_layer = nn.Sequential(
+        self.trans_layer = nn.Sequential(
             nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim)
+        )
+
+        self.out_layer = nn.Sequential(
             nn.ReLU(),
             nn.Linear(self.hidden_dim, 1),
             nn.Sigmoid()
@@ -215,26 +220,33 @@ class SeqLearn(nn.Module):
         seq_emb = self.layer_norms[-1](seq_emb)
         return seq_emb
 
-    def forward(self, users, user_seq, pos_items, neg_items, base_model_preds):
+    def forward(
+        self,
+        users,
+        user_seq,
+        pos_items,
+        neg_items,
+        pos_labels,
+        neg_labels,
+        base_model_preds
+    ):
         """
         前向传播
 
         Args:
-            users (`torch.Tensor`): 用户ID
-            user_seq (`torch.Tensor`): 用户序列
-            pos_items (`torch.Tensor`): 正样本
-            neg_items (`torch.Tensor`): 负样本
-            base_model_preds (`torch.Tensor`): 基模型预测
+            users (`torch.Tensor`): 用户ID，形状为 [batch_size]
+            user_seq (`torch.Tensor`): 用户序列，形状为 [batch_size, seq_len]
+            pos_items (`torch.Tensor`): 物品ID，形状为 [batch_size]
+            neg_items (`torch.Tensor`): 负样本物品ID，形状为 [batch_size]
+            pos_items (`torch.Tensor`): 所有物品的得分，形状为 [batch_size]
+            neg_items (`torch.Tensor`): 所有物品的得分，形状为 [batch_size]
+            base_model_preds (`torch.Tensor`): 基模型预测，形状为 [batch_size, k, 100]
 
         Returns:
             `dict`: 包含损失和预测结果的字典
         """
         # 获取用户嵌入
         user_emb = self.user_embeddings(users)  # batch_size, hidden_dim
-        
-        # 获取物品嵌入 - 确保使用不同的物品ID
-        pos_item_emb = self.item_tower(pos_items.unsqueeze(1)).squeeze(1)  # batch_size, hidden_dim
-        neg_item_emb = self.item_tower(neg_items.unsqueeze(1)).squeeze(1)  # batch_size, hidden_dim
 
         # user 侧
         user_interaction = self.item_tower(user_seq)  # bc, seq_len, hidden_dim
@@ -249,34 +261,31 @@ class SeqLearn(nn.Module):
         wgts_org = torch.sum(preference.unsqueeze(1) * basemodel_emb, dim=-1)
         wgts = F.softmax(wgts_org, dim=-1)
 
-        # 使用基模型权重乘以基模型嵌入
-        weighted_basemodel_emb = torch.sum(basemodel_emb * wgts.unsqueeze(-1), dim=1)  # bc, hidden_dim
-        
-        # 计算正样本得分
-        pos_concat = torch.cat([weighted_basemodel_emb, pos_item_emb], dim=-1)  # bc, hidden_dim*2
-        pos_scores = self.score_layer(pos_concat).squeeze(-1)  # bc
-        
-        # 计算负样本得分
-        neg_concat = torch.cat([weighted_basemodel_emb, neg_item_emb], dim=-1)  # bc, hidden_dim*2
-        neg_scores = self.score_layer(neg_concat).squeeze(-1)  # bc
+        # 计算正负样本得分
+        pos_scores = torch.sum(pos_labels * wgts, dim=1)  # bc
+        neg_scores = torch.sum(neg_labels * wgts, dim=1)  # bc
 
         return pos_scores, neg_scores
-    
-    def predict(self, users, user_seq, items, base_model_preds):
+
+    def predict(self, users, user_seq, pos_item, neg_item, all_item_scores, base_model_preds):
         """
         预测用户对物品的评分
 
         Args:
-            users (`torch.Tensor`): 用户ID，形状为 [batch_size, num_items]
-            user_seq (`torch.Tensor`): 用户序列，形状为 [batch_size, num_items, seq_len]
-            items (`torch.Tensor`): 物品ID，形状为 [num_items]
-            base_model_preds (`torch.Tensor`): 基模型预测，形状为 [batch_size, num_items, seq_len]
+            users (`torch.Tensor`): 用户ID，形状为 [batch_size]
+            user_seq (`torch.Tensor`): 用户序列，形状为 [batch_size, seq_len]
+            pos_items (`torch.Tensor`): 物品ID，形状为 [batch_size]
+            neg_items (`torch.Tensor`): 负样本物品ID，形状为 [batch_size]
+            all_items_scores (`torch.Tensor`): 所有物品的得分，形状为 [batch_size, n_base_model, num_items]
+            base_model_preds (`torch.Tensor`): 基模型预测，形状为 [batch_size, n_base_model, seq_len]
 
         Returns:
             `torch.Tensor`: 预测分数，形状为 [batch_size, num_items]
         """
+        # 获取用户嵌入
+        user_emb = self.user_embeddings(users)  # batch_size, hidden_dim
+
         # user 侧
-        user_emb = self.user_embeddings(users)  # bc, hidden_dim
         user_interaction = self.item_tower(user_seq)  # bc, seq_len, hidden_dim
         preference = self.dien_with_self_attention(user_interaction)[:, -1, :] + user_emb  # bc, hidden_dim
 
@@ -284,30 +293,15 @@ class SeqLearn(nn.Module):
         base_model_focus_llm = self._convert_focus_to_llm_embeddings(base_model_preds)  # bc, n_base_model, seq_len, hidden_dim
         each_model_emb = self.llm_projection(base_model_focus_llm)  # bc, n_base_model, seq_len, hidden_dim
         basemodel_emb = each_model_emb.mean(dim=2)  # bc, n_base_model, hidden_dim
-        basemodel_emb = each_model_emb.mean(dim=2)  # bc, n_base_model, hidden_dim
 
         # 计算基模型权重
-        wgts_org = torch.sum(preference.unsqueeze(1) * basemodel_emb, dim=-1)
-        wgts = F.softmax(wgts_org, dim=-1)
-        item_emb = self.item_tower(items.unsqueeze(1)).squeeze(1)  # bc, hidden_dim
+        wgts_org = torch.sum(preference.unsqueeze(1) * basemodel_emb, dim=-1)  # bc, n_base_model
+        wgts = F.softmax(wgts_org, dim=-1)  # bc, n_base_model
 
-        # 使用基模型权重乘以基模型嵌入
-        weighted_basemodel_emb = torch.sum(basemodel_emb * wgts.unsqueeze(-1), dim=1)  # bc, hidden_dim
+        # 计算所有物品得分
+        pred_all_item_scores = torch.sum(wgts.unsqueeze(2) * all_item_scores, dim=1)  # bc
 
-        # 计算所有物品的得分
-        # 扩展维度以便进行批量计算
-        weighted_basemodel_emb_expanded = weighted_basemodel_emb.unsqueeze(1)  # bc, 1, hidden_dim
-        item_emb_expanded = item_emb.unsqueeze(0).expand(weighted_basemodel_emb.size(0), -1, -1)  # bc, n_items, hidden_dim
-
-        # 拼接特征
-        concat = torch.cat([
-            weighted_basemodel_emb_expanded.expand(-1, item_emb.size(0), -1), 
-            item_emb_expanded
-        ], dim=-1)  # bc, n_items, hidden_dim*2
-
-        # 计算所有物品的得分
-        scores = self.score_layer(concat).squeeze(-1)  # bc, n_items
-        return scores
+        return pred_all_item_scores
 
     def topk(self, user_item_pairs, last_interaction, items_score, base_focus):
         """

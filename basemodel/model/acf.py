@@ -25,7 +25,7 @@ class ACF(object):
         self.n_attribute = len(self.data.item_side_entity)
         self.n_slot = self.n_attribute + 1
         # init all variables in a tensorflow graph
-        np.random.seed(args.seed)
+        np.random.seed(args['seed'])
 
         # 属性数量
         self.num_attribute = np.sum([self.data.entity_num[key] for key in self.data.item_side_entity])
