@@ -53,9 +53,8 @@ def train(args, data, model, train_loader, test_loader, optimizer):
         model.train()
         with tqdm(train_loader, desc=f"Epoch {epoch+1}/{args['epoch']}") as pbar:
             for batch in pbar:
-                users, user_seq, pos_items, neg_items, pos_labels, neg_labels, base_model_preds = batch
                 optimizer.zero_grad()
-                _, loss = model(users, user_seq, pos_items, neg_items, pos_labels, neg_labels, base_model_preds)
+                _, loss = model(batch)
                 loss.backward()
                 optimizer.step()
 
@@ -89,14 +88,13 @@ def test(data, model, test_loader, topk):
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="计算测试集ndcg"):
-            user_ids, user_seq, pos_items, neg_items, pos_labels, neg_labels, base_model_preds = batch
-            scores, _ = model(user_ids, user_seq, pos_items, neg_items, pos_labels, neg_labels, base_model_preds)
+            scores, _ = model(batch)
             _, indices = torch.topk(scores, topk)
             indices += 1
 
-            for i, user_id in enumerate(user_ids):
+            for i, user_id in enumerate(batch['user_id']):
                 user_id = user_id.item()
-                pos_item = pos_items[i].item()
+                pos_item = batch['pos_item'][i].item()
 
                 true_items = data.user_interacted_items[data.id_to_user[user_id].item()]
                 true_items = true_items[true_items.index(pos_item) + 1:]

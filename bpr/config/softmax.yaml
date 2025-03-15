@@ -1,11 +1,9 @@
 base_path: &base_path "D:/Code/graduation_design/"
-# base_path: &base_path "/graduation_design/"
-topk: 10
 
 data:
   sep: "::"
   maxlen: 20
-  device: "cuda:0"
+  device: "cuda"
   # nrows: 100000
   base_model_topk: 100
   train_test_split: 0.99
@@ -36,5 +34,6 @@ model:
   hidden_dim: 32
   pretrain_llm: "bert-base-uncased"
 
+topk: 10
 epoch: 1
 batch_size: 512

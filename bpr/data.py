@@ -167,7 +167,9 @@ class Data(Dataset):
         n_base_models = len(self.args['base_model'])
         neg_label = np.zeros([len(neg_samples), n_base_models])  # [n_sample * num_neg, k]
         gt_item = np.expand_dims(neg_samples, axis=1)  # [n_sample * num_neg, 1]
-        rank_chunk = copy.deepcopy(self.base_model_preds[:,:,2:2+self.args['base_model_topk']]) #[batch,k,rank]
+        rank_chunk = copy.deepcopy(
+            self.base_model_preds[:,:,2:2+self.args['base_model_topk']]
+        )  # [batch, k, rank]
 
         for k in range(n_base_models):
             rank_chunk_k = rank_chunk[:, k, :]
@@ -314,27 +316,21 @@ class SeqBPRDataset(Dataset):
 
         self.device = device
         self.is_test = is_test
-        print(f"self.device: {self.device}")
 
     def __len__(self):
         return len(self.users)
 
     def __getitem__(self, idx):
-        if not self.is_test:
-            return (
-                torch.tensor(self.users[idx], device=self.device),
-                torch.tensor(self.histories[idx], device=self.device),
-                torch.tensor(self.pos_items[idx], device=self.device),
-                torch.tensor(self.neg_items[idx], device=self.device),
-                torch.tensor(self.pos_labels[idx], device=self.device),
-                torch.tensor(self.neg_labels[idx], device=self.device),
-                torch.tensor(self.base_model_preds[idx], device=self.device)
-            )
-        return (
-            torch.tensor(self.users[idx], device=self.device),
-            torch.tensor(self.histories[idx], device=self.device),
-            torch.tensor(self.pos_items[idx], device=self.device),
-            torch.tensor(self.neg_items[idx], device=self.device),
-            torch.tensor(self.all_item_scores[idx], device=self.device),
-            torch.tensor(self.base_model_preds[idx], device=self.device)
-        )
+        case = {
+            'user_id': torch.tensor(self.users[idx], device=self.device),
+            'user_seq': torch.tensor(self.histories[idx], device=self.device),
+            'pos_item': torch.tensor(self.pos_items[idx], device=self.device),
+            'neg_item': torch.tensor(self.neg_items[idx], device=self.device),
+            'base_model_preds': torch.tensor(self.base_model_preds[idx], device=self.device)
+        }
+        if self.is_test:
+            case['all_item_scores'] = torch.tensor(self.all_item_scores[idx], device=self.device)
+        else:
+            case['pos_label'] = torch.tensor(self.pos_labels[idx], device=self.device)
+            case['neg_label'] = torch.tensor(self.neg_labels[idx], device=self.device)
+        return case

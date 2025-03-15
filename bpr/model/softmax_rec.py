@@ -21,10 +21,10 @@ class SoftmaxSeqLearn(nn.Module):
         self.cem = ContentExtractionModule()
         self._initialize_weights()
         self.to(self.device)
-        self._initialize_optimizer()
 
     def _initialize_weights(self):
         self.user_embeddings = nn.Embedding(self.n_user, self.hidden_dim)
+        nn.init.normal_(self.user_embeddings.weight, 0, 0.01)
 
         # 添加ItemTower用于获取用户嵌入
         self.item_tower = ItemTower(hidden_factor=self.hidden_dim,
@@ -37,8 +37,6 @@ class SoftmaxSeqLearn(nn.Module):
         # LLM投影层
         self.llm_projection = nn.Linear(self.item_tower.item_embeddings.shape[-1], self.hidden_dim)
 
-        # 初始化权重
-        nn.init.normal_(self.user_embeddings.weight, 0, 0.01)
         # DIEN + attention
         self.gru = nn.GRU(self.hidden_dim, self.hidden_dim, batch_first=True)
         self.attention_layer = nn.Linear(self.hidden_dim, 1)
@@ -51,13 +49,13 @@ class SoftmaxSeqLearn(nn.Module):
         self.augru = nn.GRU(self.hidden_dim, self.hidden_dim, batch_first=True)
 
         self.score_layer = nn.Sequential(
-            nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.ReLU(),
             nn.Linear(self.hidden_dim, self.n_item),
             nn.Softmax(dim=-1)
         )
 
-    def _convert_focus_to_llm_embeddings(self, base_focus):
+    def _llm_embedding(self, base_focus):
         """
         将base_focus中的物品ID转换为大模型嵌入
 
@@ -145,62 +143,56 @@ class SoftmaxSeqLearn(nn.Module):
 
         return final_outputs
 
-    def forward(self, users, user_seq, pos_items, neg_items, pos_scores, neg_scores, base_model_preds):
+    def forward(self, batch):
         """
         前向传播
 
         Args:
-            users (`torch.Tensor`): 用户ID
-            user_seq (`torch.Tensor`): 用户序列
-            pos_items (`torch.Tensor`): 正样本物品ID
-            neg_items (`torch.Tensor`): 负样本物品ID
-            pos_scores (`torch.Tensor`): 正样本得分
-            neg_scores (`torch.Tensor`): 负样本得分
-            base_model_preds (`torch.Tensor`): 基模型预测
+            batch (`dict`): 包含用户ID、用户序列、正样本物品ID、负样本物品ID、正样本得分、负样本得分、基模型预测的字典
+            - user_id (`torch.Tensor`): 用户ID
+            - user_seq (`torch.Tensor`): 用户序列
+            - pos_item (`torch.Tensor`): 正样本物品ID
+            - neg_item (`torch.Tensor`): 负样本物品ID
+            - all_item_scores (`torch.Tensor`): 所有物品得分
+            - base_model_preds (`torch.Tensor`): 基模型预测
 
         Returns:
             `dict`: 包含损失和预测结果的字典
         """
         # 获取用户嵌入
-        user_emb = self.user_embeddings(users)  # batch_size, hidden_dim
-        user_interaction = self.item_tower(user_seq)  # bc, seq_len, hidden_dim
-        preference = self.dien_with_self_attention(user_interaction)[:, -1, :] + user_emb  # bc, hidden_dim
+        user_emb = self.user_embeddings(batch['user_id'])  # batch_size, dim
+        user_interaction = self.item_tower(batch['user_seq'])  # bc, seq_len, dim
+        preference = self.dien_with_self_attention(user_interaction)[:, -1, :] \
+            + user_emb  # bc, dim
 
         # item 侧
-        base_model_focus_llm = self._convert_focus_to_llm_embeddings(base_model_preds)  # bc, n_base_model, seq_len, hidden_dim
-        each_model_emb = self.llm_projection(base_model_focus_llm)  # bc, n_base_model, seq_len, hidden_dim
-        basemodel_emb = each_model_emb.mean(dim=2)  # bc, n_base_model, hidden_dim
+        base_model_focus_llm = self._llm_embedding(batch['base_model_preds'])  # bc, n_base_model, seq_len, dim
+        each_model_emb = self.llm_projection(base_model_focus_llm)  # bc, n_base_model, seq_len, dim
+        basemodel_emb = each_model_emb.mean(dim=2)  # bc, n_base_model, dim
 
         # 计算基模型权重
         wgts_org = torch.sum(preference.unsqueeze(1) * basemodel_emb, dim=-1)
         wgts = F.softmax(wgts_org, dim=-1)
 
         # 使用基模型权重乘以基模型嵌入
-        weighted_basemodel_emb = torch.sum(basemodel_emb * wgts.unsqueeze(-1), dim=1)  # bc, hidden_dim
+        weighted_basemodel_emb = torch.sum(basemodel_emb * wgts.unsqueeze(-1), dim=1)  # bc, dim
         scores = self.score_layer(weighted_basemodel_emb)
 
-        return scores, self.loss(scores, pos_items)
-
+        return scores, self.loss(scores, batch['pos_item'])
+    
     def loss(self, preds, labels):
         """
         计算损失
 
         Args:
             preds (`torch.Tensor`): 预测得分, [bc, n_item]
-            labels (`torch.Tensor`): 真实标签, [bc, 1]
+            labels (`torch.Tensor`): 真实标签, [bc]
 
         Returns:
             `torch.Tensor`: 损失
         """
+        labels -= 1
         # 将labels扩展为one-hot形式 [bc, n_item]
         expanded_labels = torch.zeros_like(preds, device=preds.device)
-        expanded_labels.scatter_(1, labels, 1)
-        return F.binary_cross_entropy(preds, expanded_labels)
-
-    def save_model(self, save_path):
-        torch.save(self.state_dict(), save_path)
-        print(f"模型已保存到: {save_path}")
-
-    def load_model(self, load_path):
-        self.load_state_dict(torch.load(load_path))
-        print(f"模型已从以下位置加载: {load_path}")
+        expanded_labels.scatter_(1, labels.unsqueeze(1), 1)
+        return torch.sum(F.binary_cross_entropy(preds, expanded_labels), dim=0)
