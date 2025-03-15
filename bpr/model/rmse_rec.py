@@ -1,4 +1,3 @@
-import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,14 +5,12 @@ import torch.nn.functional as F
 from module.learn import ItemTower
 from module.llm_cem import ContentExtractionModule
 
-# 'ACF', 'FDSA', 'HARNN' 需要 attribute 信息，Caser', 'PFMC', 'SASRec' 仅依赖于序列信息。
-print_train = False  # 是否输出 train 上的验证结果（过拟合解释）
 base_models = ['acf', 'fdsa', 'harnn', 'caser', 'pfmc', 'sasrec', 'anam']
 
 
-class SeqLearn(nn.Module):
+class RMSESeqLearn(nn.Module):
     def __init__(self, args, data_args, n_user, n_item):
-        super(SeqLearn, self).__init__()
+        super(RMSESeqLearn, self).__init__()
         self.args = args
         self.data_args = data_args
         self.n_user = n_user
@@ -251,8 +248,8 @@ class SeqLearn(nn.Module):
 
         scores = self.score_layer(torch.cat([weighted_basemodel_emb, item_emb], dim=-1))
 
-        return scores
-    
+        return scores, self.loss(scores, item_emb)
+
     def predict(self, users, user_seq, items, base_model_preds):
         """
         预测用户对物品的评分
@@ -318,6 +315,9 @@ class SeqLearn(nn.Module):
             )
 
         return results['pred_indices'].cpu().numpy(), results['wgts'].cpu().numpy()
+    
+    def loss(self, pos_scores, neg_scores):
+        return torch.sqrt(F.mse_loss(pos_scores, neg_scores))
 
     def save_model(self, save_path):
         torch.save(self.state_dict(), save_path)

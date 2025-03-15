@@ -1,4 +1,3 @@
-import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,14 +5,12 @@ import torch.nn.functional as F
 from module.learn import ItemTower
 from module.llm_cem import ContentExtractionModule
 
-# 'ACF', 'FDSA', 'HARNN' 需要 attribute 信息，Caser', 'PFMC', 'SASRec' 仅依赖于序列信息。
-print_train = False  # 是否输出 train 上的验证结果（过拟合解释）
 base_models = ['acf', 'fdsa', 'harnn', 'caser', 'pfmc', 'sasrec', 'anam']
 
 
-class SeqLearn(nn.Module):
+class BPRSeqLearn(nn.Module):
     def __init__(self, args, data_args, n_user, n_item):
-        super(SeqLearn, self).__init__()
+        super(BPRSeqLearn, self).__init__()
         self.args = args
         self.data_args = data_args
         self.n_user = n_user
@@ -265,7 +262,7 @@ class SeqLearn(nn.Module):
         pos_scores = torch.sum(pos_labels * wgts, dim=1)  # bc
         neg_scores = torch.sum(neg_labels * wgts, dim=1)  # bc
 
-        return pos_scores, neg_scores
+        return pos_scores, neg_scores, self.loss(pos_scores, neg_scores)
 
     def predict(self, users, user_seq, pos_item, neg_item, all_item_scores, base_model_preds):
         """
@@ -302,37 +299,9 @@ class SeqLearn(nn.Module):
         pred_all_item_scores = torch.sum(wgts.unsqueeze(2) * all_item_scores, dim=1)  # bc
 
         return pred_all_item_scores
-
-    def topk(self, user_item_pairs, last_interaction, items_score, base_focus):
-        """
-        计算 topk 得分。
-
-        Args:
-            user_item_pairs (np.ndarray): 用户-物品对
-            last_interaction (np.ndarray): 最后一次交互
-            items_score (np.ndarray): 物品得分
-            base_focus (np.ndarray): 基模型表示
-
-        Returns:
-            tuple: (pred_item, wgts)
-        """
-        user_id = torch.tensor(user_item_pairs[:, 0], dtype=torch.long, device=self.device)
-        input_seq = torch.tensor(last_interaction, dtype=torch.long, device=self.device)
-        meta_all_items = torch.tensor(items_score, dtype=torch.float, device=self.device)
-
-        base_focus = torch.tensor(base_focus, dtype=torch.long, device=self.device)
-
-        self.eval()
-        with torch.no_grad():
-            results = self.forward(
-                user_id=user_id,
-                input_seq=input_seq,
-                base_focus=base_focus,
-                is_train=False,
-                all_items_scores=meta_all_items
-            )
-
-        return results['pred_indices'].cpu().numpy(), results['wgts'].cpu().numpy()
+    
+    def loss(self, pos_scores, neg_scores):
+        return -torch.sum(torch.log(torch.sigmoid(pos_scores - neg_scores)))
 
     def save_model(self, save_path):
         torch.save(self.state_dict(), save_path)

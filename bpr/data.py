@@ -233,12 +233,12 @@ class Data(Dataset):
 
                 # 如果历史序列长度不足seq_len，则在前面填充-1
                 if len(user_history) < seq_len:
-                    user_history = user_history + [-1] * (seq_len - len(user_history))
+                    user_history = user_history + [0] * (seq_len - len(user_history))
                 user_seq.append(user_history)
 
                 interaction_idx = self.get_interaction_index(user, item)
                 assert (self.base_model_preds[interaction_idx, :, :2] == (self.user_to_id[user], self.item_to_id[item])).all()
-                base_model_preds.append(self.base_model_preds[interaction_idx, :, :seq_len])  # [k, seq_len]
+                base_model_preds.append(self.base_model_preds[interaction_idx, :, 2:2+seq_len])  # [k, seq_len]
 
                 # 为每个正样本采样负样本
                 neg_items = np.random.choice(neg_items, size=num_negatives, replace=False)
@@ -314,6 +314,7 @@ class SeqBPRDataset(Dataset):
 
         self.device = device
         self.is_test = is_test
+        print(f"self.device: {self.device}")
 
     def __len__(self):
         return len(self.users)
@@ -337,24 +338,3 @@ class SeqBPRDataset(Dataset):
             torch.tensor(self.all_item_scores[idx], device=self.device),
             torch.tensor(self.base_model_preds[idx], device=self.device)
         )
-
-
-class BPRLoss(nn.Module):
-    """BPR损失函数实现"""
-
-    def __init__(self):
-        super(BPRLoss, self).__init__()
-
-    def forward(self, pos_scores, neg_scores):
-        """
-        计算BPR损失
-
-        Args:
-            pos_scores: 正样本得分，形状为 [batch_size]
-            neg_scores: 负样本得分，形状为 [batch_size]
-            
-        Returns:
-            loss: BPR损失值
-        """
-        loss = -torch.sum(torch.log(torch.sigmoid(pos_scores - neg_scores)))
-        return loss

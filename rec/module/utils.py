@@ -2,9 +2,6 @@
 import numpy as np
 import tensorflow as tf
 
-# import tensorflow.compat.v1 as tf
-# tf.disable_v2_behavior()
-
 def positional_encoding(dim, sentence_length, dtype=tf.float32):
     encoded_vec = np.array([pos/np.power(10000, 2*i/dim) for pos in range(sentence_length) for i in range(dim)])
     encoded_vec[::2] = np.sin(encoded_vec[::2])
@@ -12,42 +9,36 @@ def positional_encoding(dim, sentence_length, dtype=tf.float32):
 
     return tf.convert_to_tensor(encoded_vec.reshape([sentence_length, dim]), dtype=dtype)
 
-def normalize(inputs,
-              epsilon = 1e-8,
-              scope="ln",
-              reuse=None):
-    '''Applies layer normalization.
+def normalize(inputs, epsilon=1e-8, scope="ln", reuse=None):
+    '''应用层归一化。
     
     Args:
-      inputs: A tensor with 2 or more dimensions, where the first dimension has
-        `batch_size`.
-      epsilon: A floating number. A very small number for preventing ZeroDivision Error.
-      scope: Optional scope for `variable_scope`.
-      reuse: Boolean, whether to reuse the weights of a previous layer
-        by the same name.
+      inputs: 一个2维或更高维的张量,第一维为batch_size。
+      epsilon: 一个很小的浮点数,用于防止除零错误。
+      scope: variable_scope的可选作用域。
+      reuse: 是否重用具有相同名称的前一层的权重。
       
     Returns:
-      A tensor with the same shape and data dtype as `inputs`.
+      一个与inputs具有相同形状和数据类型的张量。
     '''
-    with tf.variable_scope(scope, reuse=reuse):
-        inputs_shape = inputs.get_shape()
-        params_shape = inputs_shape[-1:]
+    inputs_shape = inputs.shape
+    params_shape = inputs_shape[-1:]
 
-        mean, variance = tf.nn.moments(inputs, [-1], keep_dims=True)
-        beta= tf.Variable(tf.zeros(params_shape))
-        gamma = tf.Variable(tf.ones(params_shape))
-        normalized = (inputs - mean) / ( (variance + epsilon) ** (.5) )
-        outputs = gamma * normalized + beta
+    mean, variance = tf.nn.moments(inputs, [-1], keepdims=True)
+    beta = tf.Variable(tf.zeros(params_shape))
+    gamma = tf.Variable(tf.ones(params_shape))
+    normalized = (inputs - mean) / ((variance + epsilon) ** 0.5)
+    outputs = gamma * normalized + beta
 
     return outputs
 
-def embedding(inputs, 
-              vocab_size, 
-              num_units, 
-              zero_pad=True, 
+def embedding(inputs,
+              vocab_size,
+              num_units,
+              zero_pad=True,
               scale=True,
               l2_reg=0.0,
-              scope="embedding", 
+              scope="embedding",
               with_t=False,
               reuse=None):
     '''Embeds a given tensor.
@@ -102,12 +93,12 @@ def embedding(inputs,
       [ 1.22204471 -0.96587461]]]    
     ```    
     '''
-    with tf.variable_scope(scope, reuse=reuse):
-        lookup_table = tf.get_variable(
+    with tf.compat.v1.variable_scope(scope, reuse=reuse):
+        lookup_table = tf.compat.v1.get_variable(
             'lookup_table',
             dtype=tf.float32,
             shape=[vocab_size, num_units],
-            #initializer=tf.contrib.layers.xavier_initializer(),
+            #initializer=tf.keras.initializers.GlorotUniform(),
             regularizer=tf.keras.regularizers.l2(l2_reg)
         )
         if zero_pad:
@@ -122,137 +113,117 @@ def embedding(inputs,
     else:
         return outputs
 
-
-def multihead_attention(queries, 
-                        keys, 
-                        num_units=None, 
-                        num_heads=8, 
-                        dropout_rate=0,
-                        is_training=True,
-                        causality=False,
-                        scope="multihead_attention", 
-                        reuse=None,
-                        with_qk=False):
-    '''Applies multihead attention.
+def multihead_attention(queries, keys, num_units=None, num_heads=8, dropout_rate=0,
+                       is_training=True, causality=False, scope="multihead_attention", with_qk=False):
+    '''应用多头注意力机制。
     
     Args:
-      queries: A 3d tensor with shape of [N, T_q, C_q].
-      keys: A 3d tensor with shape of [N, T_k, C_k].
-      num_units: A scalar. Attention size.
-      dropout_rate: A floating point number.
-      is_training: Boolean. Controller of mechanism for dropout.
-      causality: Boolean. If true, units that reference the future are masked. 
-      num_heads: An int. Number of heads.
-      scope: Optional scope for `variable_scope`.
-      reuse: Boolean, whether to reuse the weights of a previous layer
-        by the same name.
-        
-    Returns
-      A 3d tensor with shape of (N, T_q, C)  
-    '''
-    with tf.variable_scope(scope, reuse=reuse):
-        # Set the fall back option for num_units
-        if num_units is None:
-            num_units = queries.get_shape().as_list[-1]
-        
-        # Linear projections
-        # Q = tf.layers.dense(queries, num_units, activation=tf.nn.relu) # (N, T_q, C)
-        # K = tf.layers.dense(keys, num_units, activation=tf.nn.relu) # (N, T_k, C)
-        # V = tf.layers.dense(keys, num_units, activation=tf.nn.relu) # (N, T_k, C)
-        Q = tf.layers.dense(queries, num_units, activation=None) # (N, T_q, C)
-        K = tf.layers.dense(keys, num_units, activation=None) # (N, T_k, C)
-        V = tf.layers.dense(keys, num_units, activation=None) # (N, T_k, C)
-        
-        # Split and concat
-        Q_ = tf.concat(tf.split(Q, num_heads, axis=2), axis=0) # (h*N, T_q, C/h) 
-        K_ = tf.concat(tf.split(K, num_heads, axis=2), axis=0) # (h*N, T_k, C/h) 
-        V_ = tf.concat(tf.split(V, num_heads, axis=2), axis=0) # (h*N, T_k, C/h) 
-
-        # Multiplication
-        outputs = tf.matmul(Q_, tf.transpose(K_, [0, 2, 1])) # (h*N, T_q, T_k)
-        
-        # Scale
-        outputs = outputs / (K_.get_shape().as_list()[-1] ** 0.5)
-        
-        # Key Masking
-        key_masks = tf.sign(tf.reduce_sum(tf.abs(keys), axis=-1)) # (N, T_k)
-        key_masks = tf.tile(key_masks, [num_heads, 1]) # (h*N, T_k)
-        key_masks = tf.tile(tf.expand_dims(key_masks, 1), [1, tf.shape(queries)[1], 1]) # (h*N, T_q, T_k)
-        
-        paddings = tf.ones_like(outputs)*(-2**32+1)
-        outputs = tf.where(tf.equal(key_masks, 0), paddings, outputs) # (h*N, T_q, T_k)
-  
-        # Causality = Future blinding
-        if causality:
-            diag_vals = tf.ones_like(outputs[0, :, :]) # (T_q, T_k)
-            tril = tf.linalg.LinearOperatorLowerTriangular(diag_vals).to_dense() # (T_q, T_k)
-            masks = tf.tile(tf.expand_dims(tril, 0), [tf.shape(outputs)[0], 1, 1]) # (h*N, T_q, T_k)
-   
-            paddings = tf.ones_like(masks)*(-2**32+1)
-            outputs = tf.where(tf.equal(masks, 0), paddings, outputs) # (h*N, T_q, T_k)
-  
-        # Activation
-        outputs = tf.nn.softmax(outputs) # (h*N, T_q, T_k)
-         
-        # Query Masking
-        query_masks = tf.sign(tf.reduce_sum(tf.abs(queries), axis=-1)) # (N, T_q)
-        query_masks = tf.tile(query_masks, [num_heads, 1]) # (h*N, T_q)
-        query_masks = tf.tile(tf.expand_dims(query_masks, -1), [1, 1, tf.shape(keys)[1]]) # (h*N, T_q, T_k)
-        outputs *= query_masks # broadcasting. (N, T_q, C)
-          
-        # Dropouts
-        outputs = tf.layers.dropout(outputs, rate=dropout_rate, training=tf.convert_to_tensor(is_training))
-               
-        # Weighted sum
-        outputs = tf.matmul(outputs, V_) # ( h*N, T_q, C/h)
-        
-        # Restore shape
-        outputs = tf.concat(tf.split(outputs, num_heads, axis=0), axis=2 ) # (N, T_q, C)
-              
-        # Residual connection
-        outputs += queries
-              
-        # Normalize
-        #outputs = normalize(outputs) # (N, T_q, C)
- 
-    if with_qk: return Q,K
-    else: return outputs
-
-
-def feedforward(inputs, 
-                num_units=[2048, 512],
-                scope="multihead_attention", 
-                dropout_rate=0.2,
-                is_training=True,
-                reuse=None):
-    '''Point-wise feed forward net.
-    
-    Args:
-      inputs: A 3d tensor with shape of [N, T, C].
-      num_units: A list of two integers.
-      scope: Optional scope for `variable_scope`.
-      reuse: Boolean, whether to reuse the weights of a previous layer
-        by the same name.
-        
+      queries: 形状为[N, T_q, C_q]的3维张量。
+      keys: 形状为[N, T_k, C_k]的3维张量。
+      num_units: 注意力大小的标量。
+      dropout_rate: dropout比率。
+      is_training: 是否处于训练模式。
+      causality: 如果为True,会屏蔽未来的信息。
+      num_heads: 注意力头的数量。
+      scope: variable_scope的可选作用域。
+      with_qk: 是否返回Q和K。
+      
     Returns:
-      A 3d tensor with the same shape and dtype as inputs
+      形状为(N, T_q, C)的3维张量。
     '''
-    with tf.variable_scope(scope, reuse=reuse):
-        # Inner layer
-        params = {"inputs": inputs, "filters": num_units[0], "kernel_size": 1,
-                  "activation": tf.nn.relu, "use_bias": True}
-        outputs = tf.layers.conv1d(**params)
-        outputs = tf.layers.dropout(outputs, rate=dropout_rate, training=tf.convert_to_tensor(is_training))
-        # Readout layer
-        params = {"inputs": outputs, "filters": num_units[1], "kernel_size": 1,
-                  "activation": None, "use_bias": True}
-        outputs = tf.layers.conv1d(**params)
-        outputs = tf.layers.dropout(outputs, rate=dropout_rate, training=tf.convert_to_tensor(is_training))
-        
-        # Residual connection
-        outputs += inputs
-        
-        # Normalize
-        #outputs = normalize(outputs)
+    if num_units is None:
+        num_units = queries.shape[-1]
+    
+    # 线性投影
+    Q = tf.keras.layers.Dense(num_units)(queries)  # (N, T_q, C)
+    K = tf.keras.layers.Dense(num_units)(keys)  # (N, T_k, C)
+    V = tf.keras.layers.Dense(num_units)(keys)  # (N, T_k, C)
+
+    # 分割和拼接
+    Q_ = tf.concat(tf.split(Q, num_heads, axis=2), axis=0)  # (h*N, T_q, C/h)
+    K_ = tf.concat(tf.split(K, num_heads, axis=2), axis=0)  # (h*N, T_k, C/h)
+    V_ = tf.concat(tf.split(V, num_heads, axis=2), axis=0)  # (h*N, T_k, C/h)
+
+    # 计算注意力分数
+    outputs = tf.matmul(Q_, tf.transpose(K_, [0, 2, 1]))  # (h*N, T_q, T_k)
+
+    # 缩放
+    outputs = outputs / (K_.shape[-1] ** 0.5)
+
+    # Key Masking
+    key_masks = tf.sign(tf.reduce_sum(tf.abs(keys), axis=-1))  # (N, T_k)
+    key_masks = tf.tile(key_masks, [num_heads, 1])  # (h*N, T_k)
+    key_masks = tf.tile(tf.expand_dims(key_masks, 1), [1, tf.shape(queries)[1], 1])  # (h*N, T_q, T_k)
+
+    paddings = tf.ones_like(outputs) * (-2**32+1)
+    outputs = tf.where(tf.equal(key_masks, 0), paddings, outputs)  # (h*N, T_q, T_k)
+
+    # 因果关系掩码
+    if causality:
+        diag_vals = tf.ones_like(outputs[0, :, :])  # (T_q, T_k)
+        tril = tf.linalg.band_part(diag_vals, -1, 0)  # (T_q, T_k)
+        masks = tf.tile(tf.expand_dims(tril, 0), [tf.shape(outputs)[0], 1, 1])  # (h*N, T_q, T_k)
+        paddings = tf.ones_like(masks) * (-2**32+1)
+        outputs = tf.where(tf.equal(masks, 0), paddings, outputs)  # (h*N, T_q, T_k)
+
+    # 激活
+    outputs = tf.nn.softmax(outputs)  # (h*N, T_q, T_k)
+
+    # Query Masking
+    query_masks = tf.sign(tf.reduce_sum(tf.abs(queries), axis=-1))  # (N, T_q)
+    query_masks = tf.tile(query_masks, [num_heads, 1])  # (h*N, T_q)
+    query_masks = tf.tile(tf.expand_dims(query_masks, -1), [1, 1, tf.shape(keys)[1]])  # (h*N, T_q, T_k)
+    outputs *= query_masks  # (h*N, T_q, T_k)
+
+    # Dropout
+    outputs = tf.keras.layers.Dropout(dropout_rate)(outputs, training=is_training)
+
+    # 加权求和
+    outputs = tf.matmul(outputs, V_)  # (h*N, T_q, C/h)
+
+    # 恢复形状
+    outputs = tf.concat(tf.split(outputs, num_heads, axis=0), axis=2)  # (N, T_q, C)
+
+    # 残差连接
+    outputs += queries
+
+    if with_qk:
+        return Q, K
+    return outputs
+
+
+def feedforward(inputs, num_units=[2048, 512], scope="feedforward", dropout_rate=0.2, is_training=True):
+    '''逐点前馈网络。
+    
+    Args:
+      inputs: 形状为[N, T, C]的3维张量。
+      num_units: 两个整数的列表。
+      scope: variable_scope的可选作用域。
+      dropout_rate: dropout比率。
+      is_training: 是否处于训练模式。
+      
+    Returns:
+      一个与inputs具有相同形状和数据类型的3维张量。
+    '''
+    # 第一层卷积
+    outputs = tf.keras.layers.Conv1D(
+        filters=num_units[0],
+        kernel_size=1,
+        activation=tf.nn.relu,
+        use_bias=True
+    )(inputs)
+    outputs = tf.keras.layers.Dropout(dropout_rate)(outputs, training=is_training)
+
+    # 第二层卷积
+    outputs = tf.keras.layers.Conv1D(
+        filters=num_units[1],
+        kernel_size=1,
+        activation=None,
+        use_bias=True
+    )(outputs)
+    outputs = tf.keras.layers.Dropout(dropout_rate)(outputs, training=is_training)
+
+    # 残差连接
+    outputs += inputs
     
     return outputs

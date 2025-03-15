@@ -86,12 +86,11 @@ class Pipeline(object):
                     'base_focus': base_focus_chunck,
                     'times': times
                 }
-                loss_rec, loss_div, loss_reg = self.model.partial_fit(self.feed_dict)
+                loss_rec, loss_div = self.model.partial_fit(self.feed_dict)
 
                 pbar.set_postfix({
                     'loss_rec': f'{loss_rec:.4f}',
-                    'loss_div': f'{loss_div:.4f}',
-                    'loss_reg': f'{loss_reg:.4f}'
+                    'loss_div': f'{loss_div:.4f}'
                 })
 
             if self.print_train:
@@ -107,9 +106,10 @@ class Pipeline(object):
                 test_meta=self.meta_data.test_meta,
                 topk=[20, 50]
             )
-            
-            if best_metric < maps + ndcgs + recalls and epoch < self.epoch:
-                best_metric = maps + ndcgs + recalls
+
+            metrics = np.mean(maps[20]) + np.mean(ndcgs[20]) + np.mean(recalls[20])
+            if best_metric < metrics and epoch < self.epoch:
+                best_metric = metrics
                 meta_result = self.save_meta_result()
 
             for topk in [20, 50]:
@@ -181,12 +181,9 @@ class Pipeline(object):
         for i in range(int(size / num + 1)):
             user_item_block = user_item_pairs[i*num: (i+1)*num]
             last_iteraction_block = last_iteraction[i*num: (i+1)*num]
-            feedback_block = np.concatenate((user_item_block, last_iteraction_block), axis=1)
-            try:
-                score_block = self.model.topk(feedback_block, self.item_attributes)
-            except:
-                score_block = self.model.topk(feedback_block)
-
+            items_score = self.meta_data.all_score(self.meta_data.test_meta[i*num: (i+1)*num])
+            base_focus = self.meta_data.test_meta[i*num: (i+1)*num, :, 2:2 + self.seq_max_len]
+            score_block, wgts = self.model.topk(user_item_block, last_iteraction_block, items_score, base_focus)
             score_block = score_block[:, :100].tolist()
             score.extend(score_block)
 

@@ -30,3 +30,5 @@ bpr/ckpt_sigmoid/*
 score/__pycache__/*
 score/__pycache__/data.cpython-310.pyc
 score/__pycache__/model.cpython-310.pyc
+bpr/ckpt_sem/sem_epoch3.pth
+bpr/model/__pycache__/*

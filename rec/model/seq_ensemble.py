@@ -4,8 +4,11 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
+import tensorflow as tf
+variable_scope = tf.compat.v1.variable_scope
+get_variable = tf.compat.v1.get_variable
+placeholder = tf.compat.v1.placeholder
+AUTO_REUSE = tf.compat.v1.AUTO_REUSE
 
 from data_utils import Data
 from module.utils import *
@@ -85,35 +88,30 @@ class Model(object):
         """
         初始化 tensorflow 图。
         """
-        # tf.reset_default_graph()  # 重置默认图
-        self.graph = tf.Graph()
-
-        with self.graph.as_default():  # , tf.device('/cpu:0'):
+        self.graph = tf.compat.v1.Graph()
+        
+        with self.graph.as_default():
             self.weights = self._initialize_weights()
-
-            # 以下均为占位符，用于存放数据
-            self.user_id = tf.placeholder(tf.int32, shape=[None])  # 用户 ID
-            self.item_id_pos = tf.placeholder(tf.int32, shape=[None])  # 正样本 ID
-            self.item_id_neg = tf.placeholder(tf.int32, shape=[None,None])  # 负样本 ID
-            self.input_seq = tf.placeholder(tf.int32, shape=[None, self.seq_max_len])  # 输入序列
-            self.meta_pos = tf.placeholder(tf.float32, shape=[None, self.n_base_model])  # 正样本得分
-            self.meta_neg = tf.placeholder(tf.float32, shape=[None, None, self.n_base_model])
-            self.base_model_focus = tf.placeholder(
-                tf.int32,
-                shape=[None, self.n_base_model, self.seq_max_len]
-            )  # 基模型表示
-            self.times = tf.placeholder(tf.float32, shape=[None])  # 时间戳
-            self.is_training = tf.placeholder(tf.bool, shape=())  # 是否训练
-            # 所有物品的得分
-            self.meta_all_items = tf.placeholder(
-                tf.float32,
-                shape=[None, self.n_base_model, self.n_item]
-            )
+            
+            # 将 tf.placeholder 替换为 tf.compat.v1.placeholder
+            self.user_id = tf.compat.v1.placeholder(tf.int32, shape=[None])
+            self.item_id_pos = tf.compat.v1.placeholder(tf.int32, shape=[None])
+            self.item_id_neg = tf.compat.v1.placeholder(tf.int32, shape=[None,None])
+            self.input_seq = tf.compat.v1.placeholder(tf.int32, shape=[None, self.seq_max_len])
+            self.meta_pos = tf.compat.v1.placeholder(tf.float32, shape=[None, self.n_base_model])
+            self.meta_neg = tf.compat.v1.placeholder(tf.float32, shape=[None, None, self.n_base_model])
+            self.base_model_focus = tf.compat.v1.placeholder(tf.int32, shape=[None, self.n_base_model, self.seq_max_len])
+            self.times = tf.compat.v1.placeholder(tf.float32, shape=[None])
+            self.is_training = tf.compat.v1.placeholder(tf.bool, shape=())
+            self.meta_all_items = tf.compat.v1.placeholder(tf.float32, shape=[None, self.n_base_model, self.n_item])
 
             # 用户嵌入 [none, d]
             self.user_embed = tf.nn.embedding_lookup(self.weights['user_embeddings'], self.user_id)
             # 条件
-            self.condition = tf.to_float(tf.greater(tf.reduce_sum(self.meta_pos, axis=1), 0))
+            self.condition = tf.cast(
+                tf.greater(tf.reduce_sum(self.meta_pos, axis=1), 0),
+                dtype=tf.float32
+            )
 
             # 对用户进行注意力建模
             if self.args['user_module'] == 'MC':
@@ -152,10 +150,6 @@ class Model(object):
             elif self.args['user_module'] == 'SAtt':
                 self.state = self.FFN(self.input_seq)
                 self.preference = self.state[:, -1, :] + self.user_embed  # [none,d]
-                self.items_embs = self.item_emb_table
-            elif self.args['user_module'] == 'DIEN':
-                self.state = self.dien_with_self_attention(self.input_seq)
-                self.preference = self.state[:,-1,:] + self.user_embed  # [none,d]
                 self.items_embs = self.item_emb_table
             elif self.args['user_module'] == 'static':
                 self.preference = self.user_embed
@@ -202,13 +196,13 @@ class Model(object):
 
             # 计算正则化损失
             self.loss_reg = 0
-            for wgt in tf.trainable_variables():
+            for wgt in tf.compat.v1.trainable_variables():
                 self.loss_reg += self.lamda_bilinear * tf.nn.l2_loss(wgt)
 
             # 计算多样性损失
             if self.args['div_module'] == 'AEM-cov':
                 # AEM diversity
-                self.model_emb =  self.basemodel_emb#[none,k,p]
+                self.model_emb = self.basemodel_emb#[none,k,p]
                 cov_idx = tf.constant(
                     1 - np.expand_dims(np.diag(np.ones(self.n_base_model)), axis=0),
                     dtype=tf.float32
@@ -239,15 +233,18 @@ class Model(object):
 
             # 选择优化器
             if self.optimizer_type == 'AdamOptimizer':
-                self.optimizer = tf.train.AdamOptimizer(
-                    learning_rate=self.learning_rate
+                self.optimizer = tf.compat.v1.train.AdamOptimizer(
+                    learning_rate=self.learning_rate,
+                    beta1=0.9,
+                    beta2=0.999,
+                    epsilon=1e-8
                 ).minimize(self.loss)
             elif self.optimizer_type == 'AdagradOptimizer':
-                self.optimizer = tf.train.AdagradOptimizer(
+                self.optimizer = tf.compat.v1.train.AdagradOptimizer(
                     learning_rate=self.learning_rate
                 ).minimize(self.loss)
             elif self.optimizer_type == 'SGD':
-                self.optimizer = tf.train.GradientDescentOptimizer(
+                self.optimizer = tf.compat.v1.train.GradientDescentOptimizer(
                     learning_rate=self.learning_rate
                 ).minimize(self.loss)
 
@@ -259,257 +256,25 @@ class Model(object):
             self.out_all_topk = tf.nn.top_k(out, 200)
 
             # 初始化 saver
-            self.saver = tf.train.Saver(max_to_keep=1)
+            self.saver = tf.compat.v1.train.Saver(max_to_keep=1)
 
             # 初始化会话
             self.sess = self._init_session()
 
             # 初始化所有变量
-            init = tf.global_variables_initializer()
+            init = tf.compat.v1.global_variables_initializer()
             self.sess.run(init)
-
-    def moe(self, inputs):
-        """
-        实现 Mixture of Experts 模块
-        
-        Args:
-            inputs (`tf.Tensor`): 输入张量, 形状为 [batch_size, n_experts, hidden_dim]
-
-        Returns:
-            outputs (`tf.Tensor`): 输出张量, 形状为 [batch_size, n_experts, hidden_dim]
-        """
-        n_experts = inputs.get_shape().as_list()[1]  # 专家数量(基模型数量)
-        hidden_dim = inputs.get_shape().as_list()[2]  # 隐藏层维度
-
-        # 1. 门控网络 - 为每个样本计算专家权重
-        with tf.variable_scope("gate_network"):
-            # 将输入展平
-            flat_inputs = tf.reshape(inputs, [-1, n_experts * hidden_dim])
-            # 门控网络层
-            gate_weights = tf.layers.dense(
-                flat_inputs,
-                n_experts,
-                activation=tf.nn.softmax,
-                name="gate_weights"
-            )  # [batch_size, n_experts]
-
-        # 2. 专家网络 - 每个专家独立处理输入
-        with tf.variable_scope("expert_network"):
-            experts_outputs = []
-            for i in range(n_experts):
-                with tf.variable_scope(f"expert_{i}"):
-                    expert_input = inputs[:, i, :]  # [batch_size, hidden_dim]
-                    # 每个专家是一个两层前馈网络
-                    expert_hidden = tf.layers.dense(
-                        expert_input,
-                        hidden_dim,
-                        activation=tf.nn.relu,
-                        name="expert_hidden"
-                    )
-                    expert_output = tf.layers.dense(
-                        expert_hidden,
-                        hidden_dim,
-                        activation=None,
-                        name="expert_output"
-                    )  # [batch_size, hidden_dim]
-                    experts_outputs.append(expert_output)
-
-            # 将所有专家输出堆叠
-            experts_outputs = tf.stack(experts_outputs, axis=1)  # [batch_size, n_experts, hidden_dim]
-
-        # 3. 组合专家输出
-        # 扩展门控权重维度以便广播
-        gate_weights = tf.expand_dims(gate_weights, axis=-1)  # [batch_size, n_experts, 1]
-
-        # 加权组合专家输出
-        weighted_outputs = experts_outputs * gate_weights  # [batch_size, n_experts, hidden_dim]
-
-        # 4. 残差连接
-        final_outputs = inputs + weighted_outputs
-
-        # 5. Layer Normalization
-        final_outputs = normalize(final_outputs)
-
-        return final_outputs
-
-    def dien_with_self_attention(self, input_seq):
-        """
-        计算增强版DIEN(Deep Interest Evolution Network)的输出，增加了自注意力机制。
-        
-        Args:
-            input_seq (`tf.Tensor`): 输入序列 [batch_size, seq_len]
-
-        Returns:
-            seq_emb (`tf.Tensor`): 增强版DIEN的输出 [batch_size, seq_len, hidden_factor]
-        """
-        mask = tf.expand_dims(tf.to_float(tf.not_equal(input_seq, -1)), -1)
-        reuse = tf.AUTO_REUSE
-
-        with tf.variable_scope("DIEN_SelfAttention", reuse=reuse):
-            input_seq_masked = tf.where(
-                tf.equal(input_seq, -1),
-                tf.zeros_like(input_seq) + self.n_item,  # 使用 n_item 作为填充索引
-                input_seq
-            )
-            # 1. 兴趣提取层 - 使用GRU提取兴趣表示
-            # 获取序列的嵌入表示
-            self.seq, item_emb_table = embedding(
-                input_seq_masked,
-                vocab_size=self.n_item + 1,
-                num_units=self.hidden_factor,
-                zero_pad=True,
-                scale=True,
-                l2_reg=self.lamda_bilinear,
-                scope="input_embeddings",
-                with_t=True,
-                reuse=reuse
-            )
-            self.item_emb_table = item_emb_table[1:]
-
-            # 应用mask
-            self.seq *= mask
-
-            # GRU层提取兴趣
-            with tf.variable_scope("interest_extraction"):
-                gru_cell = tf.nn.rnn_cell.GRUCell(self.hidden_factor)
-                gru_outputs, _ = tf.nn.dynamic_rnn(
-                    gru_cell,
-                    self.seq,
-                    dtype=tf.float32
-                )
-
-            # 2. 自注意力机制 - 修复版本
-            with tf.variable_scope("self_attention"):
-                # 定义自注意力参数
-                d_model = self.hidden_factor
-                num_heads = 4  # 多头注意力的头数
-
-                # 创建掩码 - 修复方法
-                # 直接创建序列长度的掩码矩阵
-                seq_len = tf.shape(input_seq)[1]
-                valid_seq = tf.cast(tf.not_equal(input_seq, -1), tf.float32)  # [batch_size, seq_len]
-
-                # 创建一个掩码矩阵，其中有效位置为1.0，无效位置为0.0
-                # 扩展维度以便进行广播
-                mask_a = tf.expand_dims(valid_seq, 2)  # [batch_size, seq_len, 1]
-                mask_b = tf.expand_dims(valid_seq, 1)  # [batch_size, 1, seq_len]
-                
-                # 通过矩阵乘法创建注意力掩码
-                attention_mask = tf.matmul(mask_a, mask_b)  # [batch_size, seq_len, seq_len]
-
-                # 多头自注意力
-                def scaled_dot_product_attention(q, k, v, mask):
-                    """计算注意力权重。
-                    q, k, v 必须具有匹配的前置维度。
-                    """
-                    matmul_qk = tf.matmul(q, k, transpose_b=True)  # (..., seq_len_q, seq_len_k)
-                    
-                    # 缩放 matmul_qk
-                    dk = tf.cast(tf.shape(k)[-1], tf.float32)
-                    scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
-                    
-                    # 将 mask 加入到缩放的张量上
-                    if mask is not None:
-                        scaled_attention_logits += (1.0 - mask) * -1e9
-                    
-                    # softmax 在最后一个轴（seq_len_k）上归一化
-                    attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
-                    
-                    output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
-                    
-                    return output, attention_weights
-                
-                # 线性变换
-                q = tf.layers.dense(gru_outputs, d_model)  # (batch_size, seq_len, d_model)
-                k = tf.layers.dense(gru_outputs, d_model)  # (batch_size, seq_len, d_model)
-                v = tf.layers.dense(gru_outputs, d_model)  # (batch_size, seq_len, d_model)
-                
-                # 分割成多头
-                batch_size = tf.shape(input_seq)[0]
-                
-                def split_heads(x, num_heads):
-                    """分拆最后一个维度到 (num_heads, depth)."""
-                    depth = d_model // num_heads
-                    x = tf.reshape(x, (batch_size, seq_len, num_heads, depth))
-                    return tf.transpose(x, perm=[0, 2, 1, 3])  # (batch_size, num_heads, seq_len, depth)
-                
-                q = split_heads(q, num_heads)  # (batch_size, num_heads, seq_len, depth)
-                k = split_heads(k, num_heads)  # (batch_size, num_heads, seq_len, depth)
-                v = split_heads(v, num_heads)  # (batch_size, num_heads, seq_len, depth)
-                
-                # 扩展 mask 到多头
-                # 修改掩码形状以适应多头注意力
-                attention_mask = tf.expand_dims(attention_mask, axis=1)  # [batch_size, 1, seq_len, seq_len]
-                
-                # 应用注意力机制
-                scaled_attention, attention_weights = scaled_dot_product_attention(
-                    q, k, v, attention_mask)
-                
-                # 合并多头
-                scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])  # (batch_size, seq_len, num_heads, depth)
-                concat_attention = tf.reshape(scaled_attention, 
-                                            (batch_size, seq_len, d_model))  # (batch_size, seq_len, d_model)
-                
-                # 最终的线性层
-                self_attention_output = tf.layers.dense(concat_attention, d_model)
-                
-                # 残差连接和层归一化
-                self_attention_output = self_attention_output + gru_outputs
-                self_attention_output = normalize(self_attention_output)
-
-            # 3. 兴趣演化层 - 使用带注意力机制的 GRU 建模兴趣演化
-            with tf.variable_scope("interest_evolution"):
-                # 注意力权重计算
-                att_weights = tf.layers.dense(
-                    self_attention_output,  # 使用自注意力的输出
-                    units=1,
-                    activation=None,
-                    use_bias=False
-                )
-                att_weights = tf.nn.softmax(att_weights, axis=1)
-
-                # 加权后的序列表示
-                weighted_seq = self_attention_output * att_weights
-
-                # 兴趣演化GRU
-                augru_cell = tf.nn.rnn_cell.GRUCell(self.hidden_factor)
-                final_outputs, _ = tf.nn.dynamic_rnn(
-                    augru_cell,
-                    weighted_seq,
-                    dtype=tf.float32
-                )
-
-            # Dropout
-            final_outputs = tf.layers.dropout(
-                final_outputs,
-                rate=0.5,
-                training=tf.convert_to_tensor(self.is_training)
-            )
-
-            # 应用mask
-            final_outputs *= mask
-
-            # Layer Normalization
-            final_outputs = normalize(final_outputs)
-
-        # 重塑输出维度
-        seq_emb = tf.reshape(final_outputs, [tf.shape(input_seq)[0], self.seq_max_len, self.hidden_factor])
-
-        return seq_emb
 
     def FFN(self, input_seq):
         """
-        计算前馈神经网络的输出。
-
-        Args:
-            input_seq (`tf.Tensor`): 输入序列
-
-        Returns:
-            seq_emb (`tf.Tensor`): 前馈神经网络的输出
+        前馈神经网络
         """
-        mask = tf.expand_dims(tf.to_float(tf.not_equal(input_seq, -1)), -1)
-        reuse = tf.AUTO_REUSE
-        with tf.variable_scope("SASRec", reuse=reuse):
+        mask = tf.expand_dims(
+            tf.cast(tf.not_equal(input_seq, -1), dtype=tf.float32),
+            -1
+        )
+        
+        with tf.compat.v1.variable_scope("FFN", reuse=tf.compat.v1.AUTO_REUSE):
             # sequence embedding, item embedding table
             self.seq, item_emb_table = embedding(input_seq,
                                                  vocab_size=self.n_item + 1, #error?
@@ -519,7 +284,7 @@ class Model(object):
                                                  l2_reg=self.lamda_bilinear,
                                                  scope="input_embeddings",
                                                  with_t=True,
-                                                 reuse=reuse
+                                                 reuse=tf.compat.v1.AUTO_REUSE
                                                  )
             self.item_emb_table = item_emb_table[1:]
 
@@ -532,22 +297,22 @@ class Model(object):
                 scale=False,
                 l2_reg=self.lamda_bilinear,
                 scope="dec_pos",
-                reuse=reuse,
+                reuse=tf.compat.v1.AUTO_REUSE,
                 with_t=True
             )
             self.seq += t
 
             # Dropout
-            self.seq = tf.layers.dropout(
+            dropout_layer = tf.keras.layers.Dropout(rate=0.5)
+            self.seq = dropout_layer(
                 self.seq,
-                rate=0.5,
                 training=tf.convert_to_tensor(self.is_training)
             )
             self.seq *= mask
 
             # Build blocks
             for i in range(2):
-                with tf.variable_scope("num_blocks_%d" % i):
+                with tf.compat.v1.variable_scope("num_blocks_%d" % i):
                     # 自注意力
                     self.seq = multihead_attention(queries=normalize(self.seq),
                                                    keys=self.seq,
@@ -575,11 +340,11 @@ class Model(object):
             session (`tf.Session`): 会话
         """
         # adaptively growing video memory
-        config = tf.ConfigProto()
+        config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
         config.gpu_options.per_process_gpu_memory_fraction = 0.9
         config.allow_soft_placement = True
-        return tf.Session(config=config)
+        return tf.compat.v1.Session(config=config)
 
     def _initialize_weights(self):
         """
@@ -652,7 +417,7 @@ class Model(object):
         Returns:
             loss (`tf.Tensor`): 正负样本损失
         """
-        return -tf.reduce_mean(tf.sigmoid((postive - negative)))
+        return -tf.reduce_sum(tf.sigmoid((postive - negative)))
 
     def topk(self, user_item_pairs, last_interaction, items_score, base_focus):
         """

@@ -1,4 +1,3 @@
-import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,25 +5,19 @@ import torch.nn.functional as F
 from module.learn import ItemTower
 from module.llm_cem import ContentExtractionModule
 
-# 'ACF', 'FDSA', 'HARNN' 需要 attribute 信息，Caser', 'PFMC', 'SASRec' 仅依赖于序列信息。
-print_train = False  # 是否输出 train 上的验证结果（过拟合解释）
-base_models = ['acf', 'fdsa', 'harnn', 'caser', 'pfmc', 'sasrec', 'anam']
 
-
-class SeqLearn(nn.Module):
+class SoftmaxSeqLearn(nn.Module):
     def __init__(self, args, data_args, n_user, n_item):
-        super(SeqLearn, self).__init__()
+        super(SoftmaxSeqLearn, self).__init__()
         self.args = args
         self.data_args = data_args
         self.n_user = n_user
         self.n_item = n_item
         self.learning_rate = args['lr']
         self.hidden_dim = args['hidden_dim']
-        self.reg_weight = args['lamda']
-        self.optimizer_type = args['optimizer']
-        self.n_base_model = len(base_models)
-        self.seq_max_len = self.data_args['maxlen']
-        self.device = torch.device("cuda:0")
+        self.n_base_model = len(data_args['base_model'])
+        self.seq_max_len = data_args['maxlen']
+        self.device = torch.device(data_args['device'])
         self.cem = ContentExtractionModule()
         self._initialize_weights()
         self.to(self.device)
@@ -32,7 +25,6 @@ class SeqLearn(nn.Module):
 
     def _initialize_weights(self):
         self.user_embeddings = nn.Embedding(self.n_user, self.hidden_dim)
-        self.seq_weights = nn.Parameter(torch.randn(1, 1, self.seq_max_len, 1) * 0.01)
 
         # 添加ItemTower用于获取用户嵌入
         self.item_tower = ItemTower(hidden_factor=self.hidden_dim,
@@ -61,16 +53,9 @@ class SeqLearn(nn.Module):
         self.score_layer = nn.Sequential(
             nn.Linear(self.hidden_dim * 2, self.hidden_dim),
             nn.ReLU(),
-            nn.Linear(self.hidden_dim, 1),
+            nn.Linear(self.hidden_dim, self.n_item),
+            nn.Softmax(dim=-1)
         )
-
-    def _initialize_optimizer(self):
-        if self.optimizer_type == 'AdamOptimizer':
-            self.optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        elif self.optimizer_type == 'AdagradOptimizer':
-            self.optimizer = torch.optim.Adagrad(self.parameters(), lr=self.learning_rate)
-        elif self.optimizer_type == 'SGD':
-            self.optimizer = torch.optim.SGD(self.parameters(), lr=self.learning_rate)
 
     def _convert_focus_to_llm_embeddings(self, base_focus):
         """
@@ -90,18 +75,18 @@ class SeqLearn(nn.Module):
 
         # 将base_focus展平为2D张量以便一次性索引
         flat_focus = base_focus.reshape(-1)
-        
+
         # 创建掩码标识有效的item_id
         valid_mask = (flat_focus >= 0) & (flat_focus < self.n_item)
         valid_indices = flat_focus[valid_mask]
-        
+
         # 获取对应的嵌入
         valid_embeddings = self.item_tower.item_embeddings[valid_indices]
-        
+
         # 将结果放回原始形状
         result_flat = result.reshape(-1, hidden_size)
         result_flat[valid_mask] = valid_embeddings
-        
+
         # 恢复原始形状
         result = result_flat.reshape(batch_size, n_base_model, seq_len, hidden_size)
 
@@ -160,68 +145,17 @@ class SeqLearn(nn.Module):
 
         return final_outputs
 
-    def FFN(self, input_seq):
-        """
-        计算前馈神经网络的输出。
-
-        Args:
-            input_seq (`torch.Tensor`): 输入序列
-
-        Returns:
-            `torch.Tensor`: 前馈神经网络的输出
-        """
-        # 创建掩码
-        mask = (input_seq != -1).float().unsqueeze(-1)
-
-        # 处理输入序列
-        input_seq_masked = torch.where(
-            input_seq == -1,
-            torch.zeros_like(input_seq) + self.n_item,
-            input_seq
-        )
-
-        # 获取序列的嵌入表示
-        seq_emb = self.sasrec_item_embeddings(input_seq_masked)
-
-        # 位置编码
-        positions = torch.arange(input_seq.size(1), device=self.device).unsqueeze(0).expand(input_seq.size(0), -1)
-        pos_emb = self.pos_embeddings(positions)
-        seq_emb = seq_emb + pos_emb
-
-        # Dropout
-        seq_emb = F.dropout(seq_emb, p=0.5, training=self.training)
-        seq_emb = seq_emb * mask
-
-        # 自注意力层
-        for i in range(2):
-            # 自注意力
-            norm_seq = self.layer_norms[i*2](seq_emb)
-            # 转置以适应PyTorch的多头注意力
-            norm_seq_t = norm_seq.transpose(0, 1)
-            attn_output, _ = self.attention_layers[i](
-                norm_seq_t, norm_seq_t, norm_seq_t, 
-                key_padding_mask=(input_seq == -1)
-            )
-            attn_output = attn_output.transpose(0, 1)
-            seq_emb = seq_emb + attn_output
-
-            # 前馈网络
-            norm_seq = self.layer_norms[i*2+1](seq_emb)
-            ff_output = self.feed_forward(norm_seq)
-            seq_emb = seq_emb + ff_output
-            seq_emb = seq_emb * mask
-
-        seq_emb = self.layer_norms[-1](seq_emb)
-        return seq_emb
-
-    def forward(self, users, user_seq, items, base_model_preds):
+    def forward(self, users, user_seq, pos_items, neg_items, pos_scores, neg_scores, base_model_preds):
         """
         前向传播
 
         Args:
             users (`torch.Tensor`): 用户ID
             user_seq (`torch.Tensor`): 用户序列
-            items (`torch.Tensor`): 物品ID
+            pos_items (`torch.Tensor`): 正样本物品ID
+            neg_items (`torch.Tensor`): 负样本物品ID
+            pos_scores (`torch.Tensor`): 正样本得分
+            neg_scores (`torch.Tensor`): 负样本得分
             base_model_preds (`torch.Tensor`): 基模型预测
 
         Returns:
@@ -229,11 +163,6 @@ class SeqLearn(nn.Module):
         """
         # 获取用户嵌入
         user_emb = self.user_embeddings(users)  # batch_size, hidden_dim
-        
-        # 获取物品嵌入 - 确保使用不同的物品ID
-        item_emb = self.item_tower(items.unsqueeze(1)).squeeze(1)  # batch_size, hidden_dim
-
-        # user 侧
         user_interaction = self.item_tower(user_seq)  # bc, seq_len, hidden_dim
         preference = self.dien_with_self_attention(user_interaction)[:, -1, :] + user_emb  # bc, hidden_dim
 
@@ -248,76 +177,25 @@ class SeqLearn(nn.Module):
 
         # 使用基模型权重乘以基模型嵌入
         weighted_basemodel_emb = torch.sum(basemodel_emb * wgts.unsqueeze(-1), dim=1)  # bc, hidden_dim
+        scores = self.score_layer(weighted_basemodel_emb)
 
-        scores = self.score_layer(torch.cat([weighted_basemodel_emb, item_emb], dim=-1))
+        return scores, self.loss(scores, pos_items)
 
-        return scores
-    
-    def predict(self, users, user_seq, items, base_model_preds):
+    def loss(self, preds, labels):
         """
-        预测用户对物品的评分
+        计算损失
 
         Args:
-            users (`torch.Tensor`): 用户ID，形状为 [batch_size, num_items]
-            user_seq (`torch.Tensor`): 用户序列，形状为 [batch_size, num_items, seq_len]
-            items (`torch.Tensor`): 物品ID，形状为 [num_items]
-            base_model_preds (`torch.Tensor`): 基模型预测，形状为 [batch_size, num_items, seq_len]
+            preds (`torch.Tensor`): 预测得分, [bc, n_item]
+            labels (`torch.Tensor`): 真实标签, [bc, 1]
 
         Returns:
-            `torch.Tensor`: 预测分数，形状为 [batch_size, num_items]
+            `torch.Tensor`: 损失
         """
-        # user 侧
-        user_emb = self.user_embeddings(users)  # bc, hidden_dim
-        user_interaction = self.item_tower(user_seq)  # bc, seq_len, hidden_dim
-        preference = self.dien_with_self_attention(user_interaction)[:, -1, :] + user_emb  # bc, hidden_dim
-
-        # item 侧
-        base_model_focus_llm = self._convert_focus_to_llm_embeddings(base_model_preds)  # bc, n_base_model, seq_len, hidden_dim
-        each_model_emb = self.llm_projection(base_model_focus_llm)  # bc, n_base_model, seq_len, hidden_dim
-        basemodel_emb = each_model_emb.mean(dim=2)  # bc, n_base_model, hidden_dim
-        basemodel_emb = each_model_emb.mean(dim=2)  # bc, n_base_model, hidden_dim
-
-        # 计算基模型权重
-        wgts_org = torch.sum(preference.unsqueeze(1) * basemodel_emb, dim=-1)
-        wgts = F.softmax(wgts_org, dim=-1)
-        item_emb = self.item_tower(items.unsqueeze(1)).squeeze(1)  # bc, hidden_dim
-
-        # 使用基模型权重乘以基模型嵌入
-        weighted_basemodel_emb = torch.sum(basemodel_emb * wgts.unsqueeze(-1), dim=1)  # bc, hidden_dim
-
-        scores = self.score_layer(torch.cat([weighted_basemodel_emb, item_emb], dim=-1))
-        return scores
-
-    def topk(self, user_item_pairs, last_interaction, items_score, base_focus):
-        """
-        计算 topk 得分。
-
-        Args:
-            user_item_pairs (np.ndarray): 用户-物品对
-            last_interaction (np.ndarray): 最后一次交互
-            items_score (np.ndarray): 物品得分
-            base_focus (np.ndarray): 基模型表示
-
-        Returns:
-            tuple: (pred_item, wgts)
-        """
-        user_id = torch.tensor(user_item_pairs[:, 0], dtype=torch.long, device=self.device)
-        input_seq = torch.tensor(last_interaction, dtype=torch.long, device=self.device)
-        meta_all_items = torch.tensor(items_score, dtype=torch.float, device=self.device)
-
-        base_focus = torch.tensor(base_focus, dtype=torch.long, device=self.device)
-
-        self.eval()
-        with torch.no_grad():
-            results = self.forward(
-                user_id=user_id,
-                input_seq=input_seq,
-                base_focus=base_focus,
-                is_train=False,
-                all_items_scores=meta_all_items
-            )
-
-        return results['pred_indices'].cpu().numpy(), results['wgts'].cpu().numpy()
+        # 将labels扩展为one-hot形式 [bc, n_item]
+        expanded_labels = torch.zeros_like(preds, device=preds.device)
+        expanded_labels.scatter_(1, labels, 1)
+        return F.binary_cross_entropy(preds, expanded_labels)
 
     def save_model(self, save_path):
         torch.save(self.state_dict(), save_path)
