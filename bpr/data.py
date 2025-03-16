@@ -27,6 +27,7 @@ class Data(Dataset):
         self.data = None
         self.args = args
         self.user_interacted_items = None
+        self.user_interacted_item_ids = None
         self.all_items = None
         self.user_to_id = {}
         self.item_to_id = {}
@@ -192,7 +193,7 @@ class Data(Dataset):
         n_samples, k, topk = rank_chunk.shape  # [batch, k, rank]
         rank_chunk_reshape = np.reshape(rank_chunk, [-1, topk])
 
-        u_k_i = np.zeros([n_samples * k, self.n_item], dtype=np.int32)  # [batch, k, n_item]
+        u_k_i = np.zeros([n_samples * k, self.n_item], dtype=np.float32)  # [batch, k, n_item]
         for i in range(topk):
             u_k_i[np.arange(len(u_k_i)), rank_chunk_reshape[:, i]] = 1 / (i + 10)
         return np.reshape(u_k_i, [n_samples, k, self.n_item])

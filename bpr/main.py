@@ -107,7 +107,7 @@ def test(data, model, test_loader, topk):
 
 
 if __name__ == '__main__':
-    with open("config/softmax.yaml", 'r', encoding='utf-8') as f:
+    with open("config/general.yaml", 'r', encoding='utf-8') as f:
         args = yaml.unsafe_load(f)
     print(args)
 

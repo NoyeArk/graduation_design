@@ -3,7 +3,7 @@ base_path: &base_path "D:/Code/graduation_design/"
 data:
   sep: "::"
   maxlen: 20
-  device: "cuda"
+  device: &device "cuda"
   # nrows: 100000
   base_model_topk: 100
   train_test_split: 0.99
@@ -30,7 +30,9 @@ data:
 
 model:
   lr: 0.001
-  type: "softmax"
+  device: *device
+  type: "rankboost"
+  n_weak_learners: 10
   hidden_dim: 32
   pretrain_llm: "bert-base-uncased"
 

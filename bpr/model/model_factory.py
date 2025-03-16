@@ -1,5 +1,6 @@
 from model.sem import Sem
 from model.bpr_rec import BPRSeqLearn
+from model.rankboost import RankBoost
 from model.rmse_rec import RMSESeqLearn
 from model.softmax_rec import SoftmaxSeqLearn
 
@@ -26,5 +27,7 @@ def get_model(model_type, args, data_args, n_user, n_item):
         return Sem(args, data_args, n_user, n_item)
     elif model_type == 'softmax':
         return SoftmaxSeqLearn(args, data_args, n_user, n_item)
+    elif model_type == 'rankboost':
+        return RankBoost(args, n_item)
     else:
         raise ValueError(f'不支持的模型类型: {model_type}')
