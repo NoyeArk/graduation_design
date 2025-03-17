@@ -6,7 +6,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from data import Data
+from data import Data, SeqBPRDataset
 from model.model_factory import get_model
 
 
@@ -54,15 +54,14 @@ def train(args, data, model, train_loader, test_loader, optimizer):
         with tqdm(train_loader, desc=f"Epoch {epoch+1}/{args['epoch']}") as pbar:
             for batch in pbar:
                 optimizer.zero_grad()
-                _, loss = model(batch)
+                loss = model(batch)
                 loss.backward()
                 optimizer.step()
 
                 total_grad = 0
                 for name, param in model.named_parameters():
                     if param.grad is not None:
-                        grad_norm = param.grad.norm().item()
-                        total_grad += grad_norm
+                        total_grad += param.grad.norm().item()
 
                 pbar.set_postfix(
                     loss=f"{loss.item():.4f}",
@@ -75,7 +74,7 @@ def train(args, data, model, train_loader, test_loader, optimizer):
         ndcg = test(data, model, test_loader, args['topk'])
         print(f"测试集/nDCG: {ndcg:.4f}")
 
-        if (epoch + 1) % 3 == 0:
+        if (epoch + 1) % 1 == 0:
             if not os.path.exists(f"ckpt_{args['model']['type']}"):
                 os.makedirs(f"ckpt_{args['model']['type']}")
             torch.save(model.state_dict(), f"ckpt_{args['model']['type']}/epoch{epoch+1}.pth")
@@ -87,22 +86,23 @@ def test(data, model, test_loader, topk):
     ndcg_scores = []
 
     with torch.no_grad():
-        for batch in tqdm(test_loader, desc="计算测试集ndcg"):
-            scores, _ = model(batch)
-            _, indices = torch.topk(scores, topk)
-            indices += 1
+        for batch in tqdm(test_loader, desc="计算测试集指标"):
+            all_scores = model.predict(batch)
+            scores, indices = torch.topk(all_scores, topk)
 
-            for i, user_id in enumerate(batch['user_id']):
-                user_id = user_id.item()
+            for i in range(len(batch['user_id'])):
+                user_id = batch['user_id'][i].item()
                 pos_item = batch['pos_item'][i].item()
 
                 true_items = data.user_interacted_items[data.id_to_user[user_id].item()]
                 true_items = true_items[true_items.index(pos_item) + 1:]
+                for j in range(len(true_items)):
+                    true_items[j] = data.item_to_id[true_items[j]]
 
                 predicted_items = np.array([indices[i].cpu().numpy().tolist()])
                 ndcg = nDCG(np.array(predicted_items), [true_items])
 
-            ndcg_scores.append(ndcg)
+                ndcg_scores.append(ndcg)
     return np.mean(ndcg_scores)
 
 
@@ -112,13 +112,18 @@ if __name__ == '__main__':
     print(args)
 
     data = Data(args['data'])
-    train_loader = DataLoader(data.train_dataset, batch_size=args['batch_size'], shuffle=True)
-    test_loader = DataLoader(data.test_dataset, batch_size=args['batch_size'], shuffle=False)
+    train_samples = np.load('datasets/train_samples.npy', allow_pickle=True)
+    test_samples = np.load('datasets/test_samples.npy', allow_pickle=True)
+    train_dataset = SeqBPRDataset(train_samples, args['data']['device'])
+    test_dataset = SeqBPRDataset(test_samples, args['data']['device'], is_test=True)
+    train_loader = DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False)
 
     model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952)
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    # model.load_state_dict(torch.load("ckpt_score_sum/bpr_epoch3.pth"))
+    # model.load_state_dict(torch.load("ckpt_ensrec/epoch2.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)
+    # print(test(data, model, test_loader, 10))
 
-    torch.save(model.state_dict(), "ckpt_sem/sem_final.pth")
+    torch.save(model.state_dict(), f"ckpt_{args['model']['type']}/final.pth")

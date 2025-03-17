@@ -5,7 +5,7 @@ from torch import nn
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
-from bpr.model.bpr_rec import SeqLearn
+from bpr.model.ensrec import SeqLearn
 from data import Data, BPRLoss
 from torch.utils.tensorboard import SummaryWriter
 

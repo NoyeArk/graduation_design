@@ -45,21 +45,21 @@ class Sem(nn.Module):
         self.to(self.device)
         print(f"model.device: {self.device}")
 
-    def forward(self, user_ids, user_seq, pos_items, neg_items, pos_scores, neg_scores, base_model_preds):
+    def forward(self, batch):
         self.item_embeddings = self.item_embeddings.to(self.device)
-        seq_emb = self.item_embeddings(user_seq)
-        user_emb = self.user_embeddings(user_ids)  # [batch_size, hidden_dim]
+        seq_emb = self.item_embeddings(batch['user_seq'])  # [batch_size, seq_len, hidden_dim]
+        user_emb = self.user_embeddings(batch['user_id'])  # [batch_size, hidden_dim]
 
         # 添加位置编码
-        positions = torch.arange(self.seq_max_len, device=self.device).expand(user_seq.size(0), -1)
+        positions = torch.arange(self.seq_max_len, device=self.device).expand(batch['user_seq'].size(0), -1)
         seq_emb = seq_emb + self.pos_embedding(positions)
 
         # 创建注意力掩码
-        mask = (user_seq == -1)
+        mask = (batch['user_seq'] == -1)
         output = self.user_encoder(seq_emb.transpose(0,1), src_key_padding_mask=mask).transpose(0,1)
         preference = output[:,-1,:] + user_emb
 
-        base_model_emb = self.item_embeddings(base_model_preds)  # [batch_size, n_base_model, seq_len, hidden_dim]
+        base_model_emb = self.item_embeddings(batch['base_model_preds'])  # [batch_size, n_base_model, seq_len, hidden_dim]
 
         # 时间衰减权重
         time_weights = 1.0 / torch.log2(torch.arange(self.seq_max_len, device=self.device) + 2)
@@ -72,8 +72,8 @@ class Sem(nn.Module):
         wgts = F.softmax(wgts_org, dim=-1)
 
         # 计算正负样本得分
-        pos_pred = torch.sum(pos_scores * wgts, dim=1)  # [batch_size]
-        neg_pred = torch.sum(neg_scores * wgts.unsqueeze(1), dim=-1)  # [batch_size, num_neg]
+        pos_pred = torch.sum(batch['pos_label'] * wgts, dim=1)  # [batch_size]
+        neg_pred = torch.sum(batch['neg_label'] * wgts.unsqueeze(1), dim=-1)  # [batch_size, num_neg]
 
         # 计算正负样本损失
         loss_rec = -torch.sum(torch.sigmoid((pos_pred - neg_pred)))
@@ -101,16 +101,33 @@ class Sem(nn.Module):
 
         return pos_pred, neg_pred, wgts, loss
 
-    def predict(self, user_ids, user_seq, all_item_scores, base_model_preds):
+    def predict(self, batch):
         """
         预测所有物品得分
         """
-        pos_pred, neg_pred, wgts, loss = self.forward(user_ids, user_seq, None, None, all_item_scores, None, base_model_preds)
-        pred_scores = torch.sum(wgts.unsqueeze(2) * all_item_scores, dim=1)  # [batch_size, n_item]
-        return pred_scores
+        seq_emb = self.item_embeddings(batch['user_seq'])  # [batch_size, seq_len, hidden_dim]
+        user_emb = self.user_embeddings(batch['user_id'])  # [batch_size, hidden_dim]
 
-    def save_model(self, path):
-        torch.save(self.state_dict(), path)
+        # 添加位置编码
+        positions = torch.arange(self.seq_max_len, device=self.device).expand(batch['user_seq'].size(0), -1)
+        seq_emb = seq_emb + self.pos_embedding(positions)
 
-    def load_model(self, path):
-        self.load_state_dict(torch.load(path))
+        # 创建注意力掩码
+        mask = (batch['user_seq'] == -1)
+        output = self.user_encoder(seq_emb.transpose(0,1), src_key_padding_mask=mask).transpose(0,1)
+        preference = output[:,-1,:] + user_emb  # [bc, hidden_dim]
+
+        base_model_emb = self.item_embeddings(batch['base_model_preds'])  # [bc, n_base_model, seq_len, hidden_dim]
+
+        # 时间衰减权重
+        time_weights = 1.0 / torch.log2(torch.arange(self.seq_max_len, device=self.device) + 2)
+        time_weights = time_weights.view(1, 1, -1, 1)  # [1, 1, seq_len, 1]
+
+        basemodel_emb = self.base_model_embeddings + torch.sum(time_weights * base_model_emb, dim=2)
+
+        # 计算基模型权重
+        wgts_org = torch.sum(preference.unsqueeze(1) * basemodel_emb, dim=-1)  # [batch_size, n_base_model]
+        wgts = F.softmax(wgts_org, dim=-1)
+
+        all_scores = torch.sum(wgts.unsqueeze(2) * batch['all_item_scores'], dim=1)  # bc
+        return all_scores

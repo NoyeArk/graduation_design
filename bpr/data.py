@@ -41,14 +41,14 @@ class Data(Dataset):
         self.load_data(args['path'])
 
         # 划分训练集和测试集
-        split_index = int(len(self.data) * args['train_test_split'])
-        self.train_data = self.data[:split_index]
-        self.test_data = self.data[split_index:]
+        # split_index = int(len(self.data) * args['train_test_split'])
+        # self.train_data = self.data[:split_index]
+        # self.test_data = self.data[split_index:]
 
         # [len(train_data) * num_negatives, dict[7]]
-        train_samples, test_samples = self.generate_samples(seq_len=args['maxlen'], num_negatives=args['num_negatives'])
-        self.train_dataset = SeqBPRDataset(train_samples, args['device'])
-        self.test_dataset = SeqBPRDataset(test_samples, args['device'], is_test=True)
+        # train_samples, test_samples = self.generate_samples(seq_len=args['maxlen'], num_negatives=args['num_negatives'])
+        # self.train_dataset = SeqBPRDataset(train_samples, args['device'])
+        # self.test_dataset = SeqBPRDataset(test_samples, args['device'], is_test=True)
 
     def load_data(self, data_path):
         """

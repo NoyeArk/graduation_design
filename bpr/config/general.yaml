@@ -3,10 +3,9 @@ base_path: &base_path "D:/Code/graduation_design/"
 data:
   sep: "::"
   maxlen: 20
-  device: &device "cuda"
-  # nrows: 100000
   base_model_topk: 100
   train_test_split: 0.99
+  device: &device "cuda"
   name: &dataset_name "ml-1m"
 
   item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "movies.dat"]
@@ -30,12 +29,12 @@ data:
 
 model:
   lr: 0.001
+  hidden_dim: 64
   device: *device
-  type: "rankboost"
+  type: "bpr_ensrec"
   n_weak_learners: 10
-  hidden_dim: 32
   pretrain_llm: "bert-base-uncased"
 
 topk: 10
-epoch: 1
+epoch: 20
 batch_size: 512

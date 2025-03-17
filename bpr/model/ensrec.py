@@ -5,22 +5,19 @@ import torch.nn.functional as F
 from module.learn import ItemTower
 from module.llm_cem import ContentExtractionModule
 
-base_models = ['acf', 'fdsa', 'harnn', 'caser', 'pfmc', 'sasrec', 'anam']
 
-
-class BPRSeqLearn(nn.Module):
+class EnsRec(nn.Module):
     def __init__(self, args, data_args, n_user, n_item):
-        super(BPRSeqLearn, self).__init__()
+        super(EnsRec, self).__init__()
         self.args = args
         self.data_args = data_args
         self.n_user = n_user
         self.n_item = n_item
         self.learning_rate = args['lr']
         self.hidden_dim = args['hidden_dim']
-        self.reg_weight = args['lamda']
-        self.n_base_model = len(base_models)
+        self.n_base_model = len(data_args['base_model'])
         self.seq_max_len = self.data_args['maxlen']
-        self.device = torch.device("cuda:0")
+        self.device = torch.device(args['device'])
         self.cem = ContentExtractionModule()
         self._initialize_weights()
         self.to(self.device)
@@ -83,18 +80,18 @@ class BPRSeqLearn(nn.Module):
 
         # 将base_focus展平为2D张量以便一次性索引
         flat_focus = base_focus.reshape(-1)
-        
+
         # 创建掩码标识有效的item_id
-        valid_mask = (flat_focus >= 0) & (flat_focus < self.n_item)
+        valid_mask = (flat_focus > 0) & (flat_focus <= self.n_item)
         valid_indices = flat_focus[valid_mask]
-        
+
         # 获取对应的嵌入
         valid_embeddings = self.item_tower.item_embeddings[valid_indices]
-        
+
         # 将结果放回原始形状
         result_flat = result.reshape(-1, hidden_size)
         result_flat[valid_mask] = valid_embeddings
-        
+
         # 恢复原始形状
         result = result_flat.reshape(batch_size, n_base_model, seq_len, hidden_size)
 
@@ -194,7 +191,7 @@ class BPRSeqLearn(nn.Module):
         pos_scores = torch.sum(batch['pos_label'] * wgts, dim=1)  # bc
         neg_scores = torch.sum(batch['neg_label'] * wgts, dim=1)  # bc
 
-        return pos_scores, neg_scores, self.loss(pos_scores, neg_scores)
+        return self.loss(pos_scores, neg_scores)
 
     def predict(self, batch):
         """
@@ -229,7 +226,7 @@ class BPRSeqLearn(nn.Module):
         # [bc, n_base_model, hidden_dim] @ [bc, 1, hidden_dim] -> [bc, n_base_model, 1]
         preference = preference.unsqueeze(1).transpose(-2, -1)  # [batch_size, hidden_dim, 1]
         wgts_org = torch.matmul(basemodel_emb, preference).squeeze(-1)
-        
+
         wgts = F.softmax(wgts_org, dim=-1)  # bc, n_base_model
         pred_all_item_scores = torch.matmul(wgts.unsqueeze(1), batch['all_item_scores']).squeeze(1)
 
