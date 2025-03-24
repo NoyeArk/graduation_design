@@ -46,7 +46,7 @@ def train(args, data, model, train_loader, test_loader, optimizer):
     #     if param.requires_grad:
     #         print(f"层: {name}, 形状: {param.shape}, 可训练参数量: {param.numel()}, {param.requires_grad}")
 
-    train.writer = SummaryWriter(f'runs/{args["model"]["type"]}_train')
+    train.writer = SummaryWriter(f'runs/{args["model"]["name"]}_train')
     train.global_step = 0
 
     for epoch in range(args['epoch']):
@@ -75,10 +75,10 @@ def train(args, data, model, train_loader, test_loader, optimizer):
         print(f"测试集/nDCG: {ndcg:.4f}")
 
         if (epoch + 1) % 1 == 0:
-            if not os.path.exists(f"ckpt_{args['model']['type']}"):
-                os.makedirs(f"ckpt_{args['model']['type']}")
-            torch.save(model.state_dict(), f"ckpt_{args['model']['type']}/epoch{epoch+1}.pth")
-            print(f"模型已保存: ckpt_{args['model']['type']}/epoch{epoch+1}.pth")
+            if not os.path.exists(f"ckpt_{args['model']['name']}"):
+                os.makedirs(f"ckpt_{args['model']['name']}")
+            torch.save(model.state_dict(), f"ckpt_{args['model']['name']}/epoch{epoch+1}.pth")
+            print(f"模型已保存: ckpt_{args['model']['name']}/epoch{epoch+1}.pth")
 
 
 def test(data, model, test_loader, topk):
@@ -122,8 +122,7 @@ if __name__ == '__main__':
     model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952)
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    # model.load_state_dict(torch.load("ckpt_ensrec/epoch2.pth"))
+    model.load_state_dict(torch.load("ckpt/dien_atten_emb64_0.3871.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)
-    # print(test(data, model, test_loader, 10))
 
-    torch.save(model.state_dict(), f"ckpt_{args['model']['type']}/final.pth")
+    torch.save(model.state_dict(), f"ckpt_{args['model']['name']}/final.pth")

@@ -34,4 +34,4 @@ bpr/ckpt_sem/sem_epoch3.pth
 bpr/model/__pycache__/*
 bpr/ckpt_bpr_ensrec/*
 bpr/datasets/*
-bpr/runs/ensrec_train/events.out.tfevents.1742218872.DESKTOP-PIQBNCN.3600.0
+bpr/runs/*

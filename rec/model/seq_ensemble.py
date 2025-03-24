@@ -89,10 +89,10 @@ class Model(object):
         初始化 tensorflow 图。
         """
         self.graph = tf.compat.v1.Graph()
-        
+
         with self.graph.as_default():
             self.weights = self._initialize_weights()
-            
+
             # 将 tf.placeholder 替换为 tf.compat.v1.placeholder
             self.user_id = tf.compat.v1.placeholder(tf.int32, shape=[None])
             self.item_id_pos = tf.compat.v1.placeholder(tf.int32, shape=[None])
