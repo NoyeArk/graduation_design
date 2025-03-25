@@ -23,6 +23,7 @@ bpr/module/__pycache__/*
 score/module/__pycache__/*
 bpr/__pycache__/*
 bpr/ckpt/*
+bpr/ckpt_filter/*
 score/__pycache__/*
 bpr/ckpt_score/bpr_epoch3.pth
 bpr/ckpt_score_sum/*
@@ -35,3 +36,6 @@ bpr/model/__pycache__/*
 bpr/ckpt_bpr_ensrec/*
 bpr/datasets/*
 bpr/runs/*
+llm_emb/*
+bpr/ckpt_ensrec_newdien_divreg_emb64/*
+bpr/ckpt_ensrec_newdien64_bc156/*

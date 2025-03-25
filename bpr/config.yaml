@@ -9,8 +9,8 @@ data:
   name: &dataset_name "ml-1m"
 
   item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "movies.dat"]
-  item_emb_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item_embeddings_64.npy"]
-  path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'ratings.dat']
+  item_emb_path: !!python/object/apply:os.path.join [*base_path, "llm_emb", *dataset_name, "bert_emb64.npy"]
+  path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.dat']
 
   num_negatives: 1
   user_threshold: 10
@@ -28,17 +28,19 @@ data:
   base_model_path: !!python/object/apply:os.path.join [*base_path, "base_model_results", *dataset_name]
 
 model:
-  name: "ensrec_64"
+  name: "ensrec_newdien_divreg_emb64"
   lr: 0.001
   hidden_dim: 64
   device: *device
   type: "bpr_ensrec"
   n_weak_learners: 10
+  # pretrain_llm: "Qwen/Qwen2.5-7B-Instruct-1M"
   pretrain_llm: "bert-base-uncased"
 
-  # 物品多样性
   use_div: true
   div_tradeoff: 1
+  use_reg: true
+  reg_tradeoff: 2
 
 topk: 10
 epoch: 10

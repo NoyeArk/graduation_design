@@ -4,6 +4,7 @@ import numpy as np
 from tqdm import tqdm
 import torch.nn as nn
 from transformers import BertModel, BertTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 class TransformerBlock(nn.Module):
@@ -66,12 +67,14 @@ class ContentExtractionModule(nn.Module):
         self.hidden_factor = hidden_factor
         self.pretrained_model_name = pretrained_model_name
         self.max_length = max_length
-        self.tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)
-        self.llm = BertModel.from_pretrained(pretrained_model_name)
-
-        # 冻结预训练LLM的参数
-        for param in self.llm.parameters():
-            param.requires_grad = False
+        self.llm = AutoModelForCausalLM.from_pretrained(
+            pretrained_model_name,
+            torch_dtype="auto",
+            device_map="auto"
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name)
+        # self.tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)
+        # self.llm = BertModel.from_pretrained(pretrained_model_name)
 
         # 如果LLM的隐藏维度与目标维度不同，添加一个线性层
         self.projection = None
@@ -84,7 +87,7 @@ class ContentExtractionModule(nn.Module):
 
         Args:
             item_description (dict): 包含项目信息的字典
-            
+
         Returns:
             content_embedding (torch.Tensor): 内容嵌入向量
         """
@@ -253,7 +256,10 @@ class ItemTower(nn.Module):
         预计算所有电影的内容嵌入
         """
         print("预计算物品内容嵌入...")
-        self.cex.to(self.device)
+        if hasattr(self.cex, 'is_meta') and self.cex.is_meta:
+            self.cex = self.cex.to_empty(device=self.device)
+        else:
+            self.cex = self.cex.to(self.device)
         self.item_transform.to(self.device)
         self.layer_norm.to(self.device)
 

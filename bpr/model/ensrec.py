@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from module.dien import DIEN
 from module.learn import ItemTower
 from module.llm_cem import ContentExtractionModule
-
 
 class EnsRec(nn.Module):
     def __init__(self, args, data_args, n_user, n_item):
@@ -19,6 +19,7 @@ class EnsRec(nn.Module):
         self.seq_max_len = self.data_args['maxlen']
         self.device = torch.device(args['device'])
         self.cem = ContentExtractionModule()
+        self.dien = DIEN(args['hidden_dim'])
         self._initialize_weights()
         self.to(self.device)
 
@@ -97,87 +98,6 @@ class EnsRec(nn.Module):
 
         return result
 
-    def dien_with_self_attention(self, input_seq):
-        """
-        计算增强版DIEN(Deep Interest Evolution Network)的输出，增加了自注意力机制。
-        
-        Args:
-            input_seq (`torch.Tensor`): 输入序列 [batch_size, seq_len, hidden_dim]
-
-        Returns:
-            `torch.Tensor`: 增强版DIEN的输出 [batch_size, seq_len, hidden_dim]
-        """
-        # GRU层提取兴趣
-        gru_outputs, _ = self.gru(input_seq)
-
-        # 创建注意力掩码
-        batch_size, seq_len, _ = input_seq.shape
-        valid_seq = torch.ones((batch_size, seq_len), device=input_seq.device)
-        mask_a = valid_seq.unsqueeze(2)
-        mask_b = valid_seq.unsqueeze(1)
-        attention_mask = torch.bmm(mask_a, mask_b)
-
-        # 多头自注意力
-        q = self.self_attention_q(gru_outputs)
-        k = self.self_attention_k(gru_outputs)
-        v = self.self_attention_v(gru_outputs)
-
-        # 计算注意力权重
-        scores = torch.bmm(q, k.transpose(1, 2)) / (self.hidden_dim ** 0.5)
-        scores = scores.masked_fill(attention_mask == 0, -1e9)
-        attention_weights = F.softmax(scores, dim=-1)
-
-        # 应用注意力
-        self_attention_output = torch.bmm(attention_weights, v)
-        self_attention_output = self.self_attention_output(self_attention_output)
-
-        # 残差连接和层归一化
-        self_attention_output = self_attention_output + gru_outputs
-        self_attention_output = self.layer_norm1(self_attention_output)
-
-        # 兴趣演化层
-        att_weights = self.attention_layer(self_attention_output)
-        att_weights = F.softmax(att_weights, dim=1)
-
-        # 加权后的序列表示
-        weighted_seq = self_attention_output * att_weights
-
-        # 兴趣演化GRU
-        final_outputs, _ = self.augru(weighted_seq)
-
-        final_outputs = F.dropout(final_outputs, p=0.5, training=self.training)
-        final_outputs = self.layer_norm2(final_outputs)
-
-        return final_outputs
-
-    def dien(self, input_seq):
-        """
-        计算DIEN(Deep Interest Evolution Network)的输出。
-        
-        Args:
-            input_seq (`torch.Tensor`): 输入序列 [batch_size, seq_len, hidden_dim]
-
-        Returns:
-            `torch.Tensor`: DIEN的输出 [batch_size, seq_len, hidden_dim]
-        """
-        # GRU层提取兴趣
-        gru_outputs, _ = self.gru(input_seq)
-
-        # 兴趣演化层
-        att_weights = self.attention_layer(gru_outputs)
-        att_weights = F.softmax(att_weights, dim=1)
-
-        # 加权后的序列表示
-        weighted_seq = gru_outputs * att_weights
-
-        # 兴趣演化GRU
-        final_outputs, _ = self.augru(weighted_seq)
-
-        final_outputs = F.dropout(final_outputs, p=0.5, training=self.training)
-        final_outputs = self.layer_norm2(final_outputs)
-
-        return final_outputs
-
     def forward(self, batch):
         """
         前向传播
@@ -198,7 +118,8 @@ class EnsRec(nn.Module):
         # user 侧
         user_emb = self.user_embeddings(batch['user_id'])  # bc, dim
         user_interaction = self.item_tower(batch['user_seq'])  # bc, seq_len, dim
-        preference = self.dien_with_self_attention(user_interaction)[:, -1, :] + user_emb  # bc, dim
+        target_emb = self.item_tower(batch['pos_item'])  # bc, dim
+        preference = self.dien(user_interaction, target_emb) + user_emb  # bc, dim
 
         # item 侧
         base_model_focus_llm = self._convert_focus_to_llm_embeddings(batch['base_model_preds'])  # bc, n_base_model, seq_len, dim
@@ -218,22 +139,26 @@ class EnsRec(nn.Module):
         # 计算正负样本得分
         pos_scores = torch.sum(batch['pos_label'] * wgts, dim=1)  # bc
         neg_scores = torch.sum(batch['neg_label'] * wgts, dim=1)  # bc
-        
-        loss_rec = -torch.sum(torch.log(torch.sigmoid(pos_scores - neg_scores)))
 
-        # 计算多样性损失
-        model_emb = basemodel_emb  # [bc, n_base_model, dim]
-        cov_wgt = torch.detach(wgts.unsqueeze(1) + wgts.unsqueeze(2))  # [bc, n_base_model, n_base_model]
-        cov_idx = (1 - torch.eye(self.n_base_model, device=self.device)).unsqueeze(0)  # [1, n_base_model, n_base_model]
-        model_emb_1 = model_emb.unsqueeze(1)  # [bc, 1, n_base_model, dim]
-        model_emb_2 = model_emb.unsqueeze(2)  # [bc, n_base_model, 1, dim]
-        cov_div = torch.sum(model_emb_1 * model_emb_2, dim=-1).pow(2)  # [bc, n_base_model, n_base_model]
+        loss = -torch.sum(torch.log(torch.sigmoid(pos_scores - neg_scores)))
 
-        # 计算最终的多样性损失
-        loss_div = cov_idx * (1 - cov_div) * cov_wgt # [bc, n_base_model, n_base_model]
-        loss_div = -self.args['div_tradeoff'] * torch.sum(loss_div)
+        if self.args['use_div']:
+            cov_wgt = torch.detach(wgts.unsqueeze(1) + wgts.unsqueeze(2))  # [bc, n_base_model, n_base_model]
+            cov_mask = (1 - torch.eye(self.n_base_model, device=self.device)).unsqueeze(0)  # [1, n_base_model, n_base_model]
+            model_emb1 = basemodel_emb.unsqueeze(1)  # [bc, 1, n_base_model, dim]
+            model_emb2 = basemodel_emb.unsqueeze(2)  # [bc, n_base_model, 1, dim]
+            cov_div = torch.sum(model_emb1 * model_emb2, dim=-1).pow(2)  # [bc, n_base_model, n_base_model]
 
-        loss = loss_rec + loss_div
+            loss_div = cov_mask * cov_div * cov_wgt # [bc, n_base_model, n_base_model]
+            loss_div = self.args['div_tradeoff'] * torch.mean(loss_div)
+            loss += loss_div
+
+        if self.args['use_reg']:
+            loss_reg = 0
+            for param in self.parameters():
+                if param.requires_grad:
+                    loss_reg += self.args['reg_tradeoff'] * F.mse_loss(param, torch.zeros_like(param))
+            loss += loss_reg
 
         return loss
 
@@ -255,7 +180,8 @@ class EnsRec(nn.Module):
         # user 侧
         user_emb = self.user_embeddings(batch['user_id'])  # bc, dim
         user_interaction = self.item_tower(batch['user_seq'])  # bc, seq_len, dim
-        preference = self.dien_with_self_attention(user_interaction)[:, -1, :] + user_emb  # bc, dim
+        target_emb = self.item_tower(batch['pos_item'])  # bc, dim
+        preference = self.dien(user_interaction, target_emb) + user_emb  # bc, dim
 
         # item 侧
         base_model_focus_llm = self._convert_focus_to_llm_embeddings(batch['base_model_preds'])  # bc, n_base_model, seq_len, hidden_dim
@@ -275,6 +201,3 @@ class EnsRec(nn.Module):
         pred_all_item_scores = torch.matmul(wgts.unsqueeze(1), batch['all_item_scores']).squeeze(1)
 
         return pred_all_item_scores
-    
-    def loss(self, pos_scores, neg_scores):
-        return -torch.sum(torch.log(torch.sigmoid(pos_scores - neg_scores)))

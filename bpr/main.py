@@ -107,7 +107,7 @@ def test(data, model, test_loader, topk):
 
 
 if __name__ == '__main__':
-    with open("config/general.yaml", 'r', encoding='utf-8') as f:
+    with open("config.yaml", 'r', encoding='utf-8') as f:
         args = yaml.unsafe_load(f)
     print(args)
 
@@ -122,7 +122,7 @@ if __name__ == '__main__':
     model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952)
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    model.load_state_dict(torch.load("ckpt/dien_atten_emb64_0.3871.pth"))
+    # model.load_state_dict(torch.load("ckpt_ensrec_reg64/epoch10.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)
 
     torch.save(model.state_dict(), f"ckpt_{args['model']['name']}/final.pth")

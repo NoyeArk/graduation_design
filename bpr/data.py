@@ -234,7 +234,7 @@ class Data(Dataset):
                 item_idx = items.index(item)
                 user_history = items[max(0, item_idx - seq_len):item_idx]
 
-                # 如果历史序列长度不足seq_len，则在前面填充-1
+                # 如果历史序列长度不足seq_len，则在前面填充0
                 if len(user_history) < seq_len:
                     user_history = user_history + [0] * (seq_len - len(user_history))
                 user_seq.append(user_history)
