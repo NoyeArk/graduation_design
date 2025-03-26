@@ -39,3 +39,15 @@ bpr/runs/*
 llm_emb/*
 bpr/ckpt_ensrec_newdien_divreg_emb64/*
 bpr/ckpt_ensrec_newdien64_bc156/*
+bce/__pycache__/data.cpython-310.pyc
+bce/datasets/test_samples.npy
+bce/datasets/train_samples.npy
+bce/model/__pycache__/ensrec.cpython-310.pyc
+bce/model/__pycache__/model_factory.cpython-310.pyc
+bce/module/__pycache__/dien.cpython-310.pyc
+bce/module/__pycache__/learn.cpython-310.pyc
+bce/module/__pycache__/llm_cem.cpython-310.pyc
+bpr/.ipynb_checkpoints/config-checkpoint.yaml
+bpr/.ipynb_checkpoints/data-checkpoint.py
+bpr/ckpt_ensrec_newdien_qwen/*
+data_npy.zip

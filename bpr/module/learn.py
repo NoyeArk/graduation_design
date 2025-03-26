@@ -3,8 +3,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 import torch.nn as nn
-from transformers import BertModel, BertTokenizer
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer
 
 
 class TransformerBlock(nn.Module):
@@ -67,7 +66,7 @@ class ContentExtractionModule(nn.Module):
         self.hidden_factor = hidden_factor
         self.pretrained_model_name = pretrained_model_name
         self.max_length = max_length
-        self.llm = AutoModelForCausalLM.from_pretrained(
+        self.llm = AutoModel.from_pretrained(
             pretrained_model_name,
             torch_dtype="auto",
             device_map="auto"
@@ -93,10 +92,10 @@ class ContentExtractionModule(nn.Module):
         """
         # 使用预定义的提示模板
         prompt = f"""
-        The item information is given as follows. Item title is "{item_description['title']}".
-        This item belongs to "{item_description['category']}" and brand is "{item_description['brand']}".
-        The price is "{item_description['price']}". The words of item are "{item_description['keywords']}".
-        This item supports "{item_description['features']}".
+            The item information is given as follows. Item title is "{item_description['title']}".
+            This item belongs to "{item_description['category']}" and brand is "{item_description['brand']}".
+            The price is "{item_description['price']}". The words of item are "{item_description['keywords']}".
+            This item supports "{item_description['features']}".
         """
 
         # 对文本进行编码
@@ -115,6 +114,7 @@ class ContentExtractionModule(nn.Module):
 
         # 如果需要，进行维度投影
         if self.projection is not None:
+            content_embedding = content_embedding.float()  # 将 BFloat16 转换为 Float
             content_embedding = self.projection(content_embedding)
 
         return content_embedding
@@ -237,10 +237,11 @@ class ItemTower(nn.Module):
         )
 
         self.layer_norm = nn.LayerNorm(hidden_factor)
+        self.movies_data = self.load_movielens_data(data_filepath)
+        self.item_to_idx = {item_id: idx for idx, item_id in enumerate(list(self.movies_data.keys()))}
 
         # 如果缓存路径不存在，则预计算物品嵌入
         if not os.path.exists(self.cache_path):
-            self.movies_data = self.load_movielens_data(data_filepath)
             self.cex = ContentExtractionModule(
                 hidden_factor=hidden_factor,
                 pretrained_model_name=pretrained_model_name,
@@ -351,30 +352,42 @@ class ItemTower(nn.Module):
 
         return movies_data
 
-    def forward(self, item_id):
+    def forward(self, item_ids, type):
         """
         前向传播
 
         Args:
-            item_id (torch.Tensor): 物品ID, 形状为 [batch_size, seq]
+            item_id (torch.Tensor): 物品ID, [1, 3952]
 
         Returns:
             item_embedding (torch.Tensor): 物品嵌入，形状为 [batch_size, seq, hidden_factor]，其中 batch_size 为批次大小，seq 为序列长度，hidden_factor 为隐藏层维度
         """
-        # 将item_id减1并转换为索引矩阵
-        item_indices = (item_id - 1).clamp(0, self.item_embeddings.shape[0]-1)
+        if type == 'base_model':
+            batch_size, n_base_model, seq_len = item_ids.shape
+            for i in range(len(item_ids)):
+                for j in range(len(item_ids[i])):
+                    for k in range(len(item_ids[i][j])):
+                        item_ids[i][j][k] = self.item_to_idx[item_ids[i][j][k].item()]
+            item_indices = item_ids.reshape(-1)
+            item_embeddings = self.item_embeddings[item_indices]
+            item_embeddings = item_embeddings.reshape(batch_size, n_base_model, seq_len, -1)
 
-        # 一次性获取所有物品的嵌入 [batch_size, seq_len, hidden_factor]
-        item_embeddings = self.item_embeddings[item_indices]
+        elif type == 'user_seq':
+            batch_size, seq_len = item_ids.shape
+            for i in range(len(item_ids)):
+                for j in range(len(item_ids[i])):
+                    item_ids[i][j] = self.item_to_idx[item_ids[i][j].item()]
+            item_indices = item_ids.reshape(-1)
+            item_embeddings = self.item_embeddings[item_indices]
+            item_embeddings = item_embeddings.reshape(batch_size, seq_len, -1)
+        
+        elif type == 'single_item':
+            batch_size = item_ids.shape
+            for i in range(len(item_ids)):
+                item_ids[i] = self.item_to_idx[item_ids[i].item()]
+            item_indices = item_ids
+            item_embeddings = self.item_embeddings[item_indices]
 
-        # 将item_embeddings移动到正确的设备
-        item_embeddings = item_embeddings.to(item_id.device)
-
-        # 创建无效ID的掩码 (考虑ID减1后的情况)
-        invalid_mask = (item_id <= 0) | (item_id > self.item_embeddings.shape[0])
-        item_embeddings[invalid_mask] = 0
-
-        # 批量转换物品特征
         item_embeddings = self.item_transform(item_embeddings)
         item_embeddings = self.layer_norm(item_embeddings)
 

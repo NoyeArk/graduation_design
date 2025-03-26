@@ -41,14 +41,14 @@ class Data(Dataset):
         self.load_data(args['path'])
 
         # 划分训练集和测试集
-        # split_index = int(len(self.data) * args['train_test_split'])
-        # self.train_data = self.data[:split_index]
-        # self.test_data = self.data[split_index:]
+        split_index = int(len(self.data) * args['train_test_split'])
+        self.train_data = self.data[:split_index]
+        self.test_data = self.data[split_index:]
 
         # [len(train_data) * num_negatives, dict[7]]
-        # train_samples, test_samples = self.generate_samples(seq_len=args['maxlen'], num_negatives=args['num_negatives'])
-        # self.train_dataset = SeqBPRDataset(train_samples, args['device'])
-        # self.test_dataset = SeqBPRDataset(test_samples, args['device'], is_test=True)
+        train_samples, test_samples = self.generate_samples(seq_len=args['maxlen'], num_negatives=args['num_negatives'])
+        self.train_dataset = SeqBPRDataset(train_samples, args['device'])
+        self.test_dataset = SeqBPRDataset(test_samples, args['device'], is_test=True)
 
     def load_data(self, data_path):
         """
@@ -95,12 +95,12 @@ class Data(Dataset):
         print(f">>>> 数据加载完成: {len(self.data)} 条交互, {self.n_user} 个用户, {self.n_item} 个物品")
 
         # 加载基模型的预测结果
-        # self.base_model_preds = []
-        # for base_model in self.args['base_model']:
-        #     res = np.load(self.args['base_model_path'] + f"/{base_model}.npy")
-        #     self.base_model_preds.append(res)
-        # self.base_model_preds = np.stack(self.base_model_preds, axis=1)
-        # print(f">>>> 基模型的预测结果加载完成: {self.base_model_preds.shape}")
+        self.base_model_preds = []
+        for base_model in self.args['base_model']:
+            res = np.load(self.args['base_model_path'] + f"/{base_model}.npy")
+            self.base_model_preds.append(res)
+        self.base_model_preds = np.stack(self.base_model_preds, axis=1)
+        print(f">>>> 基模型的预测结果加载完成: {self.base_model_preds.shape}")
 
     def _create_id_mappings(self):
         """创建用户和物品的ID映射"""
@@ -255,29 +255,37 @@ class Data(Dataset):
         test_size = len(user_item_pairs) - train_size
 
         for i in tqdm(range(train_size), desc=">>>> 构建训练集"):
+            # 正样本
             train_samples.append({
                 'user_id': self.user_to_id[user_item_pairs[i][0]],  # 用户ID（映射后）
                 'history_seq': user_seq[i],  # [seq_len]
-                'pos_item': user_item_pairs[i][1],  # 正样本
-                'neg_item': neg_samples[i],  # 负样本
-                'pos_label': pos_labels[i],  # [k]
-                'neg_label': neg_labels[i],  # [k]
-                'base_model_preds': base_model_preds[i]  # [k, seq_len]
+                'item': user_item_pairs[i][1],
+                'label': 1,
+                'base_model_scores': pos_labels[i],  # [k]
+                'base_model_preds': base_model_preds[i]  # [k, 100]
+            })
+            # 负样本
+            train_samples.append({
+                'user_id': self.user_to_id[user_item_pairs[i][0]],  # 用户ID（映射后）
+                'history_seq': user_seq[i],  # [seq_len]
+                'item': neg_samples[i],  # 负样本
+                'label': 0,
+                'base_model_scores': neg_labels[i],  # [k]
+                'base_model_preds': base_model_preds[i]  # [k, 100]
             })
         print(f">>>> 生成了 {len(train_samples)} 个训练样本")
 
         test_samples = []
-        base_model_preds_test = base_model_preds[-test_size:]
+        base_model_preds_test = self.base_model_preds[-test_size:]
         all_scores = self.all_item_score(base_model_preds_test)
 
         for j in tqdm(range(train_size, len(user_item_pairs)), desc=">>>> 构建测试集"):
             test_samples.append({
                 'user_id': self.user_to_id[user_item_pairs[j][0]],  # 用户ID（映射后）
                 'history_seq': user_seq[j],  # [seq_len]
-                'pos_item': user_item_pairs[j][1],  # 正样本
-                'neg_item': neg_samples[j],  # 负样本
+                'item': user_item_pairs[j][1],  # 正样本
                 'all_item_scores': all_scores[j - train_size],  # [k, all_items]
-                'base_model_preds': base_model_preds[j]  # [k, seq_len]
+                'base_model_preds': base_model_preds[j]  # [k, 100]
             })
         print(f">>>> 生成了 {len(test_samples)} 个测试样本")
 
@@ -306,11 +314,9 @@ class SeqBPRDataset(Dataset):
         """
         self.users = [sample['user_id'] for sample in samples]
         self.histories = [sample['history_seq'] for sample in samples]
-        self.pos_items = [sample['pos_item'] for sample in samples]
-        self.neg_items = [sample['neg_item'] for sample in samples]
+        self.items = [sample['item'] for sample in samples]
         if not is_test:
-            self.pos_labels = [sample['pos_label'] for sample in samples]
-            self.neg_labels = [sample['neg_label'] for sample in samples]
+            self.labels = [sample['label'] for sample in samples]
         else:
             self.all_item_scores = [sample['all_item_scores'] for sample in samples]
         self.base_model_preds = [sample['base_model_preds'] for sample in samples]
@@ -325,13 +331,11 @@ class SeqBPRDataset(Dataset):
         case = {
             'user_id': torch.tensor(self.users[idx], device=self.device),
             'user_seq': torch.tensor(self.histories[idx], device=self.device),
-            'pos_item': torch.tensor(self.pos_items[idx], device=self.device),
-            'neg_item': torch.tensor(self.neg_items[idx], device=self.device),
+            'item': torch.tensor(self.items[idx], device=self.device),
             'base_model_preds': torch.tensor(self.base_model_preds[idx], device=self.device)
         }
         if self.is_test:
             case['all_item_scores'] = torch.tensor(self.all_item_scores[idx], device=self.device)
         else:
-            case['pos_label'] = torch.tensor(self.pos_labels[idx], device=self.device)
-            case['neg_label'] = torch.tensor(self.neg_labels[idx], device=self.device)
+            case['label'] = torch.tensor(self.labels[idx], device=self.device)
         return case

@@ -29,25 +29,6 @@ def nDCG(rec_items, test_set):
         ndcgs.append(ndcg)
     return ndcgs
 
-def all_item_score(dataset):
-    """
-    返回所有得分物品的函数
-
-    Args:
-        dataset (`np.ndarray`): 训练集或测试集, [n_samples, k, 2+rank]
-
-    Returns:
-        u_k_i (`np.ndarray`): 所有得分, [n_samples, k, n_item]
-    """
-    rank_chunk = dataset  # [batch, k, rank]
-    n_samples, k, topk = rank_chunk.shape  # [batch, k, rank]
-    rank_chunk_reshape = np.reshape(rank_chunk, [-1, topk])
-
-    u_k_i = np.zeros([n_samples * k, 3123], dtype=np.float32)  # [batch, k, n_item]
-    for i in range(topk):
-        u_k_i[np.arange(len(u_k_i)), rank_chunk_reshape[:, i]] = 1 / (i + 10)
-    return np.reshape(u_k_i, [n_samples, k, 3123])
-
 
 def train(args, data, model, train_loader, test_loader, optimizer):
     # 冻结LLM参数
@@ -59,10 +40,11 @@ def train(args, data, model, train_loader, test_loader, optimizer):
     total_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"可训练总参数量: {total_trainable_params:,}")
 
-    # 查看每层可训练参数
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            print(f"层: {name}, 形状: {param.shape}, 可训练参数量: {param.numel()}, {param.requires_grad}")
+    # print("---------------------------")
+    # # 查看每层可训练参数
+    # for name, param in model.named_parameters():
+    #     if param.requires_grad:
+    #         print(f"层: {name}, 形状: {param.shape}, 可训练参数量: {param.numel()}, {param.requires_grad}")
 
     train.writer = SummaryWriter(f'runs/{args["model"]["name"]}_train')
     train.global_step = 0
@@ -71,12 +53,6 @@ def train(args, data, model, train_loader, test_loader, optimizer):
         model.train()
         with tqdm(train_loader, desc=f"Epoch {epoch+1}/{args['epoch']}") as pbar:
             for batch in pbar:
-                batch['all_item_scores'] = torch.Tensor(all_item_score((batch['base_model_preds']).cpu().numpy())).cuda()
-                # 将 [0, 3122] -> [1, 3952]
-                for i in range(len(batch['base_model_preds'])):
-                    for j in range(len(batch['base_model_preds'][i])):
-                        for k in range(len(batch['base_model_preds'][i][j])):
-                            batch['base_model_preds'][i][j][k] = data.id_to_item[batch['base_model_preds'][i][j][k].item()]
                 optimizer.zero_grad()
                 loss = model(batch)
                 loss.backward()
@@ -104,17 +80,13 @@ def train(args, data, model, train_loader, test_loader, optimizer):
             torch.save(model.state_dict(), f"ckpt_{args['model']['name']}/epoch{epoch+1}_{round(ndcg, 4)}.pth")
             print(f"模型已保存: ckpt_{args['model']['name']}/epoch{epoch+1}_{round(ndcg, 4)}.pth")
 
+
 def test(data, model, test_loader, topk):
     model.eval()
     ndcg_scores = []
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="计算测试集指标"):
-            batch['all_item_scores'] = torch.Tensor(all_item_score((batch['base_model_preds']).cpu().numpy())).cuda()
-            for i in range(len(batch['base_model_preds'])):
-                for j in range(len(batch['base_model_preds'][i])):
-                    for k in range(len(batch['base_model_preds'][i][j])):
-                        batch['base_model_preds'][i][j][k] = data.id_to_item[batch['base_model_preds'][i][j][k].item()]
             all_scores = model.predict(batch)
             scores, indices = torch.topk(all_scores, topk)
 
@@ -135,20 +107,18 @@ def test(data, model, test_loader, topk):
 
 
 if __name__ == '__main__':
-    with open("config/qwen_config.yaml", 'r', encoding='utf-8') as f:
+    with open("config.yaml", 'r', encoding='utf-8') as f:
         args = yaml.unsafe_load(f)
     print(args)
 
     data = Data(args['data'])
-    train_samples = np.load('datasets/train_samples.npy', allow_pickle=True)
-    test_samples = np.load('datasets/test_samples.npy', allow_pickle=True)
-    train_dataset = SeqBPRDataset(train_samples, args['data']['device'])
-    test_dataset = SeqBPRDataset(test_samples, args['data']['device'], is_test=True)
-    train_loader = DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False)
+    train_loader = DataLoader(data.train_dataset, batch_size=args['batch_size'], shuffle=True)
+    test_loader = DataLoader(data.test_dataset, batch_size=args['batch_size'], shuffle=False)
 
     model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952)
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    # model.load_state_dict(torch.load("ckpt_ensrec_newdien_qwen/epoch10_0.3666.pth"))
+    # model.load_state_dict(torch.load("ckpt_ensrec_reg64/epoch10.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)
+
+    torch.save(model.state_dict(), f"ckpt_{args['model']['name']}/final.pth")

@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 import torch.nn as nn
-from transformers import BertModel, BertTokenizer
+from transformers import AutoModel, AutoTokenizer
 
 
 class TransformerBlock(nn.Module):
@@ -66,12 +66,14 @@ class ContentExtractionModule(nn.Module):
         self.hidden_factor = hidden_factor
         self.pretrained_model_name = pretrained_model_name
         self.max_length = max_length
-        self.tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)
-        self.llm = BertModel.from_pretrained(pretrained_model_name)
-
-        # 冻结预训练LLM的参数
-        for param in self.llm.parameters():
-            param.requires_grad = False
+        self.llm = AutoModel.from_pretrained(
+            pretrained_model_name,
+            torch_dtype="auto",
+            device_map="auto"
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name)
+        # self.tokenizer = BertTokenizer.from_pretrained(pretrained_model_name)
+        # self.llm = BertModel.from_pretrained(pretrained_model_name)
 
         # 如果LLM的隐藏维度与目标维度不同，添加一个线性层
         self.projection = None
@@ -84,16 +86,16 @@ class ContentExtractionModule(nn.Module):
 
         Args:
             item_description (dict): 包含项目信息的字典
-            
+
         Returns:
             content_embedding (torch.Tensor): 内容嵌入向量
         """
         # 使用预定义的提示模板
         prompt = f"""
-        The item information is given as follows. Item title is "{item_description['title']}".
-        This item belongs to "{item_description['category']}" and brand is "{item_description['brand']}".
-        The price is "{item_description['price']}". The words of item are "{item_description['keywords']}".
-        This item supports "{item_description['features']}".
+            The item information is given as follows. Item title is "{item_description['title']}".
+            This item belongs to "{item_description['category']}" and brand is "{item_description['brand']}".
+            The price is "{item_description['price']}". The words of item are "{item_description['keywords']}".
+            This item supports "{item_description['features']}".
         """
 
         # 对文本进行编码
@@ -201,6 +203,7 @@ class PreferenceAlignmentModule(nn.Module):
         
         return refined_embeddings
 
+
 class ItemTower(nn.Module):
     """
     物品塔，处理物品特征并生成物品嵌入
@@ -214,19 +217,6 @@ class ItemTower(nn.Module):
         self.device = device
         self.cache_path = cache_path
         self.hidden_factor = hidden_factor
-
-        # 如果缓存路径不存在，则预计算物品嵌入
-        if not os.path.exists(self.cache_path):
-            self.movies_data = self.load_movielens_data(data_filepath)
-            self.cex = ContentExtractionModule(
-                hidden_factor=hidden_factor,
-                pretrained_model_name=pretrained_model_name,
-                max_length=max_length
-            )
-            self._precompute_item_embeddings()
-        else:
-            print(">>>> 加载预计算的物品嵌入...")
-            self.item_embeddings = torch.from_numpy(np.load(self.cache_path)).float().to(self.device)
 
         # 物品特征转换层 - 确保输入维度与LLM输出维度匹配
         self.item_transform = nn.Sequential(
@@ -247,12 +237,28 @@ class ItemTower(nn.Module):
 
         self.layer_norm = nn.LayerNorm(hidden_factor)
 
+        # 如果缓存路径不存在，则预计算物品嵌入
+        if not os.path.exists(self.cache_path):
+            self.movies_data = self.load_movielens_data(data_filepath)
+            self.cex = ContentExtractionModule(
+                hidden_factor=hidden_factor,
+                pretrained_model_name=pretrained_model_name,
+                max_length=max_length
+            )
+            self._precompute_item_embeddings()
+        else:
+            print(">>>> 加载预计算的物品嵌入...")
+            self.item_embeddings = torch.from_numpy(np.load(self.cache_path)).float().to(self.device)
+
     def _precompute_item_embeddings(self):
         """
         预计算所有电影的内容嵌入
         """
         print("预计算物品内容嵌入...")
-        self.cex.to(self.device)
+        if hasattr(self.cex, 'is_meta') and self.cex.is_meta:
+            self.cex = self.cex.to_empty(device=self.device)
+        else:
+            self.cex = self.cex.to(self.device)
         self.item_transform.to(self.device)
         self.layer_norm.to(self.device)
 
@@ -260,9 +266,9 @@ class ItemTower(nn.Module):
         embeddings = []
 
         # 获取所有电影ID
-        item_ids = list(self.movies_data.keys())
-        for i in tqdm(range(0, len(item_ids), batch_size), desc="预计算物品嵌入"):
-            batch_ids = item_ids[i:i+batch_size]
+        items = list(self.movies_data.keys())
+        for i in tqdm(range(0, len(items), batch_size), desc="预计算物品嵌入"):
+            batch_ids = items[i:i+batch_size]
             batch_descriptions = []
 
             for item_id in batch_ids:
@@ -291,9 +297,6 @@ class ItemTower(nn.Module):
 
                 # 添加到结果列表
                 embeddings.append(item_embeddings_batch.cpu())
-
-            if (i + batch_size) % 1000 == 0 or i + batch_size >= len(item_ids):
-                print(f"处理进度: {i + batch_size}/{len(item_ids)}")
 
         # 合并所有批次的嵌入
         self.item_embeddings = torch.cat(embeddings, dim=0).to(self.device)
@@ -357,20 +360,19 @@ class ItemTower(nn.Module):
         Returns:
             item_embedding (torch.Tensor): 物品嵌入，形状为 [batch_size, seq, hidden_factor]，其中 batch_size 为批次大小，seq 为序列长度，hidden_factor 为隐藏层维度
         """
-        # 使用预计算的物品嵌入
-        # 将item_id转换为索引矩阵
-        item_indices = item_id.clamp(0, self.item_embeddings.shape[0]-1)
-        
+        # 将item_id减1并转换为索引矩阵
+        item_indices = (item_id - 1).clamp(0, self.item_embeddings.shape[0]-1)
+
         # 一次性获取所有物品的嵌入 [batch_size, seq_len, hidden_factor]
         item_embeddings = self.item_embeddings[item_indices]
-        
+
         # 将item_embeddings移动到正确的设备
         item_embeddings = item_embeddings.to(item_id.device)
-        
-        # 创建无效ID的掩码
-        invalid_mask = (item_id < 0) | (item_id >= self.item_embeddings.shape[0])
+
+        # 创建无效ID的掩码 (考虑ID减1后的情况)
+        invalid_mask = (item_id <= 0) | (item_id > self.item_embeddings.shape[0])
         item_embeddings[invalid_mask] = 0
-        
+
         # 批量转换物品特征
         item_embeddings = self.item_transform(item_embeddings)
         item_embeddings = self.layer_norm(item_embeddings)
@@ -379,6 +381,7 @@ class ItemTower(nn.Module):
 
 
 class UserTower(nn.Module):
+
     """
     用户塔
     结合内容提取模块和偏好对齐模块，生成用户嵌入
