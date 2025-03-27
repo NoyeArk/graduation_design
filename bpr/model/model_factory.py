@@ -19,7 +19,7 @@ def get_model(model_type, args, data_args, n_user, n_item):
         对应类型的模型实例
     """
     if model_type == 'bpr_ensrec':
-        return EnsRec(args, data_args, n_user, n_item)
+        return EnsRec(args, data_args, n_user)
     elif model_type == 'RMSE':
         return RMSESeqLearn(args, data_args, n_user, n_item)
     elif model_type== 'SEM':

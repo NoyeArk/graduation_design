@@ -26,7 +26,6 @@ class Data(Dataset):
         """
         self.data = None
         self.args = args
-        self.user_interacted_items = None
         self.user_interacted_item_ids = None
         self.all_items = None
         self.user_to_id = {}
@@ -85,22 +84,22 @@ class Data(Dataset):
         self._create_id_mappings()
 
         # 构建用户交互字典
-        self.user_interacted_items = defaultdict(list)
+        self.user_interacted_item_ids = defaultdict(list)
         for row in self.data.itertuples():
-            self.user_interacted_items[row.user].append(row.item)
+            self.user_interacted_item_ids[row.user_id].append(row.item_id)
 
         # 所有物品集合
-        self.all_items = set(self.data['item'].unique())
+        self.all_item_ids = set(self.data['item_id'].unique())
 
         print(f">>>> 数据加载完成: {len(self.data)} 条交互, {self.n_user} 个用户, {self.n_item} 个物品")
 
         # 加载基模型的预测结果
-        # self.base_model_preds = []
-        # for base_model in self.args['base_model']:
-        #     res = np.load(self.args['base_model_path'] + f"/{base_model}.npy")
-        #     self.base_model_preds.append(res)
-        # self.base_model_preds = np.stack(self.base_model_preds, axis=1)
-        # print(f">>>> 基模型的预测结果加载完成: {self.base_model_preds.shape}")
+        self.base_model_preds = []
+        for base_model in self.args['base_model']:
+            res = np.load(self.args['base_model_path'] + f"/{base_model}.npy")
+            self.base_model_preds.append(res)
+        self.base_model_preds = np.stack(self.base_model_preds, axis=1)
+        print(f">>>> 基模型的预测结果加载完成: {self.base_model_preds.shape}")
 
     def _create_id_mappings(self):
         """创建用户和物品的ID映射"""
@@ -124,7 +123,7 @@ class Data(Dataset):
         # 添加交互索引映射
         self.interaction_indices = {}
         for idx, row in self.data.iterrows():
-            key = (row['user'], row['item'])
+            key = (row['user_id'], row['item_id'])
             self.interaction_indices[key] = idx
 
     def label_positive(self):
@@ -139,7 +138,7 @@ class Data(Dataset):
         # 创建得分矩阵，形状为 [样本数, 基模型数]
         pos_label = np.zeros([len(self.data), n_base_models])
         # 获取真实 (Ground Truth) 物品 ID，扩展维度成 [batch, 1]
-        gt_item = np.expand_dims(self.data['item'].values, axis=1)
+        gt_item = np.expand_dims(self.data['item_id'].values, axis=1)
 
         # 复制基模型预测的前 N 个排名结果，形状为 [batch, k, N]，k 是基模型数量，N 是考虑的排名数量
         rank_chunk = copy.deepcopy(self.base_model_preds[:, :, 2:2+self.args['base_model_topk']])  # [batch, k, rank]
@@ -155,22 +154,22 @@ class Data(Dataset):
         # 对应的得分
         return pos_label  # [n_sample, k]
 
-    def label_negative(self, neg_samples):
+    def label_negative(self, neg_item_ids):
         """
         返回负样本得分的函数
 
         Args:
-            neg_samples (`np.ndarray`): 负样本列表
+            neg_item_ids (`np.ndarray`): 负样本列表
 
         Returns:
             label (`np.ndarray`): 负样本得分
         """
         n_base_models = len(self.args['base_model'])
-        neg_label = np.zeros([len(neg_samples), n_base_models])  # [n_sample * num_neg, k]
-        gt_item = np.expand_dims(neg_samples, axis=1)  # [n_sample * num_neg, 1]
+        neg_label = np.zeros([len(neg_item_ids), n_base_models])  # [n_sample * num_neg, k]
+        gt_item = np.expand_dims(neg_item_ids, axis=1)  # [n_sample * num_neg, 1]
         rank_chunk = copy.deepcopy(
-            self.base_model_preds[:,:,2:2+self.args['base_model_topk']]
-        )  # [batch, k, rank]
+            self.base_model_preds[:, :, 2:2+self.args['base_model_topk']]
+        )  # [batch, k, topk]
 
         for k in range(n_base_models):
             rank_chunk_k = rank_chunk[:, k, :]
@@ -189,9 +188,9 @@ class Data(Dataset):
         Returns:
             u_k_i (`np.ndarray`): 所有得分, [n_samples, k, n_item]
         """
-        rank_chunk = dataset[:,:,2:2+self.args['base_model_topk']]  # [batch, k, rank]
-        n_samples, k, topk = rank_chunk.shape  # [batch, k, rank]
-        rank_chunk_reshape = np.reshape(rank_chunk, [-1, topk])
+        # rank_chunk = dataset[:,:,2:2+self.args['base_model_topk']]  # [batch, k, rank]
+        n_samples, k, topk = dataset.shape  # [batch, k, rank]
+        rank_chunk_reshape = np.reshape(dataset, [-1, topk])
 
         u_k_i = np.zeros([n_samples * k, self.n_item], dtype=np.float32)  # [batch, k, n_item]
         for i in range(topk):
@@ -219,19 +218,18 @@ class Data(Dataset):
 
         user_data = self.data.sort_values(['user', 'timestamp'])
 
-        for user, group in tqdm(user_data.groupby('user'), desc=">>>> 采样负样本"):
-            items = group['item'].tolist()  # 获取原始item id
+        for user_id, group in tqdm(user_data.groupby('user_id'), desc=">>>> 采样负样本"):
+            item_ids = group['item_id'].tolist()  # 获取原始item id
+            items = group['item'].tolist()  # 获取原始item
 
             # 预先获取用户未交互物品列表,避免重复计算
-            neg_items = list(self.all_items - set(self.user_interacted_items[user]))
-            if not neg_items:
-                continue
+            neg_item_ids = list(self.all_item_ids - set(self.user_interacted_item_ids[user_id]))
 
-            for item in items:
-                user_item_pairs.append([user, item])
+            for item_id in item_ids:
+                user_item_pairs.append([user_id, item_id])
 
                 # 获取用户交互过的item之前的seq_len个交互作为历史序列
-                item_idx = items.index(item)
+                item_idx = items.index(self.id_to_item[item_id])
                 user_history = items[max(0, item_idx - seq_len):item_idx]
 
                 # 如果历史序列长度不足seq_len，则在前面填充0
@@ -239,43 +237,46 @@ class Data(Dataset):
                     user_history = user_history + [0] * (seq_len - len(user_history))
                 user_seq.append(user_history)
 
-                interaction_idx = self.get_interaction_index(user, item)
-                assert (self.base_model_preds[interaction_idx, :, :2] == (self.user_to_id[user], self.item_to_id[item])).all()
+                interaction_idx = self.get_interaction_index(user_id, item_id)
+                assert (self.base_model_preds[interaction_idx, :, :2] == (user_id, item_id)).all()
                 base_model_preds.append(self.base_model_preds[interaction_idx, :, 2:2+seq_len])  # [k, seq_len]
 
                 # 为每个正样本采样负样本
-                neg_items = np.random.choice(neg_items, size=num_negatives, replace=False)
-                for neg_item in neg_items:
-                    neg_samples.append(neg_item)
+                sample_neg_item_ids = np.random.choice(neg_item_ids, size=num_negatives, replace=False)
+                neg_samples.extend(sample_neg_item_ids)
 
         neg_labels = self.label_negative(neg_samples)
 
-        train_samples = []
+        train_samples, test_samples = [], []
         train_size = int(len(user_item_pairs) * self.args['train_test_split'])
         test_size = len(user_item_pairs) - train_size
 
+        base_model_preds = np.array(base_model_preds).astype(np.int32)
+        base_model_preds_test = base_model_preds[-test_size:]
+        all_scores = self.all_item_score(base_model_preds_test)
+
+        # 将 base_model_preds 的索引从 [0, 3122] 转换为 [1, 3952]
+        vectorized_id_map = np.vectorize(lambda x: self.id_to_item[x])
+        base_model_preds = vectorized_id_map(base_model_preds)
+
         for i in tqdm(range(train_size), desc=">>>> 构建训练集"):
             train_samples.append({
-                'user_id': self.user_to_id[user_item_pairs[i][0]],  # 用户ID（映射后）
+                'user_id': user_item_pairs[i][0],  # 用户ID
                 'history_seq': user_seq[i],  # [seq_len]
-                'pos_item': user_item_pairs[i][1],  # 正样本
-                'neg_item': neg_samples[i],  # 负样本
+                'pos_item': self.id_to_item[user_item_pairs[i][1]],  # 正样本
+                'neg_item': self.id_to_item[neg_samples[i]],  # 负样本
                 'pos_label': pos_labels[i],  # [k]
                 'neg_label': neg_labels[i],  # [k]
                 'base_model_preds': base_model_preds[i]  # [k, seq_len]
             })
         print(f">>>> 生成了 {len(train_samples)} 个训练样本")
 
-        test_samples = []
-        base_model_preds_test = base_model_preds[-test_size:]
-        all_scores = self.all_item_score(base_model_preds_test)
-
         for j in tqdm(range(train_size, len(user_item_pairs)), desc=">>>> 构建测试集"):
             test_samples.append({
-                'user_id': self.user_to_id[user_item_pairs[j][0]],  # 用户ID（映射后）
+                'user_id': user_item_pairs[j][0],  # 用户ID
                 'history_seq': user_seq[j],  # [seq_len]
-                'pos_item': user_item_pairs[j][1],  # 正样本
-                'neg_item': neg_samples[j],  # 负样本
+                'pos_item': self.id_to_item[user_item_pairs[j][1]],  # 正样本
+                'neg_item': self.id_to_item[neg_samples[j]],  # 负样本
                 'all_item_scores': all_scores[j - train_size],  # [k, all_items]
                 'base_model_preds': base_model_preds[j]  # [k, seq_len]
             })
@@ -283,9 +284,9 @@ class Data(Dataset):
 
         return train_samples, test_samples
 
-    def get_interaction_index(self, user, item):
+    def get_interaction_index(self, user_id, item_id):
         """获取用户-物品交互在数据集中的索引"""
-        key = (user, item)
+        key = (user_id, item_id)
         return self.interaction_indices.get(key, -1)
 
 
