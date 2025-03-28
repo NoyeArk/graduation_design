@@ -114,11 +114,11 @@ class Pipeline(object):
                     best_metric = np.sum(test_result)
                     meta_result = self.save_meta_result()
                 else:
-                    dir_name = f"../datasets/{basemodel}/{self.args['dataset']['name']}"
+                    dir_name = f"../base_model_results/{self.args['dataset']['name']}"
                     if not os.path.isdir(dir_name):
                         os.makedirs(dir_name)
                     np.save(
-                        f"../datasets/{basemodel}/{self.args['dataset']['name']}/{self.args['model']}.npy", 
+                        f"../base_model_results/{self.args['dataset']['name']}/{self.args['model']}.npy", 
                         meta_result
                     )
                     break
@@ -191,7 +191,7 @@ class Pipeline(object):
             attribute = np.array(attribute)
             attributes.append(attribute + start_index)
             start_index = start_index + self.data.entity_num[entity]
-        return np.stack(attributes,axis=1)
+        return np.stack(attributes, axis=1)
 
     def evaluate_topk(self, test_set, topk):
         """

@@ -50,8 +50,8 @@ class ANAM(object):
             self.attribute_p5 = tf.nn.embedding_lookup(self.attribute_EMB,self.users_p5_idx)# none * 5 *d
             self.item_p5 = tf.nn.embedding_lookup(self.item_EMB,self.users_p5_idx)# none * 5 * d
             
-            self.item_attribute =  self.attribute_p5 * self.item_p5 
-            
+            self.item_attribute =  self.attribute_p5 * self.item_p5
+
             lstmCell = tf.keras.layers.LSTMCell(self.hidden_factor)
 #            lstmCell = tf.contrib.rnn.DropoutWrapper(cell=lstmCell, output_keep_prob=0.75)
             self.value, self.preference = tf.nn.dynamic_rnn(lstmCell, self.item_attribute, dtype=tf.float32)

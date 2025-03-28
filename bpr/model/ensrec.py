@@ -4,7 +4,6 @@ import torch.nn.functional as F
 
 from module.dien import DIEN
 from module.learn import ItemTower
-from module.llm_cem import ContentExtractionModule
 
 
 class EnsRec(nn.Module):
@@ -18,38 +17,19 @@ class EnsRec(nn.Module):
         self.n_base_model = len(data_args['base_model'])
         self.seq_max_len = self.data_args['maxlen']
         self.device = torch.device(args['device'])
-        self.cem = ContentExtractionModule()
+
         self.dien = DIEN(args['hidden_dim'])
-        self._initialize_weights()
-        self.to(self.device)
-
-    def _initialize_weights(self):
         self.user_embeddings = nn.Embedding(self.n_user, self.hidden_dim)
-        self.seq_weights = nn.Parameter(torch.randn(1, 1, self.seq_max_len, 1) * 0.01)
-
-        # 添加ItemTower用于获取用户嵌入
+        nn.init.normal_(self.user_embeddings.weight, 0, 0.01)
         self.item_tower = ItemTower(hidden_factor=self.hidden_dim,
                                    pretrained_model_name=self.args['pretrain_llm'],
                                    max_length=self.data_args['maxlen'],
                                    data_filepath=f"{self.data_args['item_path']}",
                                    cache_path=f"{self.data_args['item_emb_path']}",
                                    device=self.device)
-
-        # LLM投影层
         self.llm_projection = nn.Linear(self.item_tower.item_embeddings.shape[-1], self.hidden_dim)
 
-        # 初始化权重
-        nn.init.normal_(self.user_embeddings.weight, 0, 0.01)
-        # DIEN + attention
-        self.gru = nn.GRU(self.hidden_dim, self.hidden_dim, batch_first=True)
-        self.attention_layer = nn.Linear(self.hidden_dim, 1)
-        self.self_attention_q = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.self_attention_k = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.self_attention_v = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.self_attention_output = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.layer_norm1 = nn.LayerNorm(self.hidden_dim)
-        self.layer_norm2 = nn.LayerNorm(self.hidden_dim)
-        self.augru = nn.GRU(self.hidden_dim, self.hidden_dim, batch_first=True)
+        self.to(self.device)
 
     def forward(self, batch, is_test=False):
         """

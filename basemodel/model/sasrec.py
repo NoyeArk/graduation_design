@@ -521,7 +521,7 @@ class SasrecTrain(Pipeline):
                     MAP_valid = np.sum(init_test_TopK_test)
                     self.meta_result = self.save_meta_result()
                 else:
-                    np.save("../datasets/%s/%s/%s.npy"%(basemodel, self.args.name, self.args.model), self.meta_result)
+                    np.save("D:/Code/graduation_design/base_model_results/%s/sasrec.npy"%(self.args.name), self.meta_result)
                     break
 
     def sample_negative(self, data, num=10):

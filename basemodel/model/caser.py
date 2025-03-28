@@ -221,5 +221,5 @@ class CaserTrain(Pipeline):
                     MAP_valid = np.sum(init_test_TopK_test)
                     self.meta_result = self.save_meta_result()
                 else:
-                    np.save("D:/Code/graduation_design/datasets/%s/%s/%s.npy"%(basemodel,self.args['dataset']['name'],self.args['model']),self.meta_result )
+                    np.save("D:/Code/graduation_design/base_model_results/%s/caser.npy"%(self.args['dataset']['name']),self.meta_result)
                     break
