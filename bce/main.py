@@ -36,15 +36,8 @@ def train(args, data, model, train_loader, test_loader, optimizer):
         if name.startswith('cem.llm'):
             param.requires_grad = False
 
-    # 计算可训练总参数量
     total_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"可训练总参数量: {total_trainable_params:,}")
-
-    # print("---------------------------")
-    # # 查看每层可训练参数
-    # for name, param in model.named_parameters():
-    #     if param.requires_grad:
-    #         print(f"层: {name}, 形状: {param.shape}, 可训练参数量: {param.numel()}, {param.requires_grad}")
 
     train.writer = SummaryWriter(f'runs/{args["model"]["name"]}_train')
     train.global_step = 0
@@ -70,15 +63,14 @@ def train(args, data, model, train_loader, test_loader, optimizer):
 
                 train.writer.add_scalar('训练/损失', loss.item(), train.global_step)
                 train.global_step += 1
-
         ndcg = test(data, model, test_loader, args['topk'])
         print(f"测试集/nDCG: {ndcg:.4f}")
 
-        if (epoch + 1) % 1 == 0:
-            if not os.path.exists(f"ckpt_{args['model']['name']}"):
-                os.makedirs(f"ckpt_{args['model']['name']}")
-            torch.save(model.state_dict(), f"ckpt_{args['model']['name']}/epoch{epoch+1}_{round(ndcg, 4)}.pth")
-            print(f"模型已保存: ckpt_{args['model']['name']}/epoch{epoch+1}_{round(ndcg, 4)}.pth")
+        if not os.path.exists(f"ckpt_{args['model']['name']}"):
+            os.makedirs(f"ckpt_{args['model']['name']}")
+        ckpt_name = f"ckpt_{args['model']['name']}/epoch{epoch+1}_{round(ndcg, 4)}.pth"
+        torch.save(model.state_dict(), ckpt_name)
+        print(f"模型已保存: {ckpt_name}")
 
 
 def test(data, model, test_loader, topk):
@@ -87,27 +79,25 @@ def test(data, model, test_loader, topk):
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="计算测试集指标"):
-            all_scores = model.predict(batch)
+            all_scores = model(batch, is_test=True)
             scores, indices = torch.topk(all_scores, topk)
 
             for i in range(len(batch['user_id'])):
                 user_id = batch['user_id'][i].item()
                 pos_item = batch['pos_item'][i].item()
 
-                true_items = data.user_interacted_items[data.id_to_user[user_id].item()]
-                true_items = true_items[true_items.index(pos_item) + 1:]
-                for j in range(len(true_items)):
-                    true_items[j] = data.item_to_id[true_items[j]]
+                true_item_ids = data.user_interacted_item_ids[user_id]
+                true_item_ids = true_item_ids[true_item_ids.index(data.item_to_id[pos_item]) + 1:]
 
-                predicted_items = np.array([indices[i].cpu().numpy().tolist()])
-                ndcg = nDCG(np.array(predicted_items), [true_items])
+                predicted_item_ids = np.array([indices[i].cpu().numpy().tolist()])
+                ndcg = nDCG(np.array(predicted_item_ids), [true_item_ids])
 
                 ndcg_scores.append(ndcg)
     return np.mean(ndcg_scores)
 
 
 if __name__ == '__main__':
-    with open("config.yaml", 'r', encoding='utf-8') as f:
+    with open("config/qwen_config.yaml", 'r', encoding='utf-8') as f:
         args = yaml.unsafe_load(f)
     print(args)
 
@@ -118,7 +108,5 @@ if __name__ == '__main__':
     model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952)
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    # model.load_state_dict(torch.load("ckpt_ensrec_reg64/epoch10.pth"))
+    # model.load_state_dict(torch.load("ckpt_qwen_fixbug_reg/epoch10_0.3975.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)
-
-    torch.save(model.state_dict(), f"ckpt_{args['model']['name']}/final.pth")

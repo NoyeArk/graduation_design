@@ -80,7 +80,7 @@ class ContentExtractionModule(nn.Module):
         if self.llm.config.hidden_size != hidden_factor:
             self.projection = nn.Linear(self.llm.config.hidden_size, hidden_factor)
 
-    def process_item_description(self, item_description):
+    def process_item_description(self, item_description, is_json=False):
         """
         处理单个项目描述，生成内容嵌入
 
@@ -90,13 +90,17 @@ class ContentExtractionModule(nn.Module):
         Returns:
             content_embedding (torch.Tensor): 内容嵌入向量
         """
-        # 使用预定义的提示模板
-        prompt = f"""
-            The item information is given as follows. Item title is "{item_description['title']}".
-            This item belongs to "{item_description['category']}" and brand is "{item_description['brand']}".
-            The price is "{item_description['price']}". The words of item are "{item_description['keywords']}".
-            This item supports "{item_description['features']}".
-        """
+        if not is_json:
+            prompt = f"""
+                The item information is given as follows. Item title is "{item_description['title']}".
+                This item belongs to "{item_description['category']}" and brand is "{item_description['brand']}".
+                The price is "{item_description['price']}". The words of item are "{item_description['keywords']}".
+                This item supports "{item_description['features']}".
+            """
+        else:
+            prompt = f"""
+                The item information is given as follows. {item_description}".
+            """
 
         # 对文本进行编码
         inputs = self.tokenizer(prompt, return_tensors="pt", max_length=self.max_length,
@@ -110,27 +114,30 @@ class ContentExtractionModule(nn.Module):
             hidden_states = outputs.last_hidden_state
 
         # 平均池化
-        content_embedding = torch.mean(hidden_states, dim=1)  # [batch_size, hidden_size]
+        # content_embedding = torch.mean(hidden_states, dim=1)  # [batch_size, hidden_size]
+        content_embedding = hidden_states[:, -1, :]  # [batch_size, hidden_size]
 
         # 如果需要，进行维度投影
         if self.projection is not None:
+            content_embedding = content_embedding.float()  # 将 BFloat16 转换为 Float
             content_embedding = self.projection(content_embedding)
 
         return content_embedding
 
-    def forward(self, item_descriptions):
+    def forward(self, item_descriptions, is_json=False):
         """
         处理一批项目描述
         
         Args:
             item_descriptions (list): 项目描述列表
-            
+            is_json (bool): 是否为json格式
+
         Returns:
             content_embeddings (torch.Tensor): 内容嵌入张量 [batch_size, hidden_factor]
         """
         content_embeddings = []
         for item_desc in item_descriptions:
-            embedding = self.process_item_description(item_desc)
+            embedding = self.process_item_description(item_desc, is_json)
             content_embeddings.append(embedding)
 
         return torch.cat(content_embeddings, dim=0)
@@ -183,7 +190,7 @@ class PreferenceAlignmentModule(nn.Module):
 
         # 应用内容适配器
         adapted_embeddings = self.content_adaptor(content_embedding_sequence)
-        
+
         # 添加位置编码
         position_ids = torch.arange(seq_length, dtype=torch.long, device=adapted_embeddings.device)
         position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
@@ -209,7 +216,7 @@ class ItemTower(nn.Module):
     物品塔，处理物品特征并生成物品嵌入
     """
     def __init__(self, hidden_factor=64, pretrained_model_name="bert-base-uncased", max_length=128,
-                 data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat", 
+                 data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat",
                  cache_path="D:/Code/graduation_design/data/ml-1m/item_embeddings.npy",
                  device=None, num_transformer_layers=2, num_attention_heads=4,
                  intermediate_size=256, dropout_rate=0.1):
@@ -236,10 +243,23 @@ class ItemTower(nn.Module):
         )
 
         self.layer_norm = nn.LayerNorm(hidden_factor)
+        self.item_data = self.load_movielens_data(data_filepath)
+        if data_filepath == "D:/Code/graduation_design/data/magazine/item.dat":
+            self.cex = ContentExtractionModule(
+                hidden_factor=hidden_factor,
+                pretrained_model_name=pretrained_model_name,
+                max_length=max_length
+            )
+            self.item_data = {}
+            with open(data_filepath, 'r') as fp:
+                for line in tqdm(fp):
+                    item_id = line.strip().split('::')[0]
+                    self.item_data[item_id] = line.strip().split('::')[1]
+        self.item_to_idx = {item_id: idx for idx, item_id in enumerate(list(self.item_data.keys()))}
+        self.item_to_idx['0'] = len(self.item_data)
 
         # 如果缓存路径不存在，则预计算物品嵌入
         if not os.path.exists(self.cache_path):
-            self.movies_data = self.load_movielens_data(data_filepath)
             self.cex = ContentExtractionModule(
                 hidden_factor=hidden_factor,
                 pretrained_model_name=pretrained_model_name,
@@ -250,11 +270,46 @@ class ItemTower(nn.Module):
             print(">>>> 加载预计算的物品嵌入...")
             self.item_embeddings = torch.from_numpy(np.load(self.cache_path)).float().to(self.device)
 
+    def _precompute_magazine_item_embeddings(self):
+        self.cex = self.cex.to(self.device)
+        self.item_transform.to(self.device)
+        self.layer_norm.to(self.device)
+
+        batch_size = 32
+        embeddings = []
+
+        items = list(self.item_data.keys())
+        for i in tqdm(range(0, len(items), batch_size), desc=">>>> 预计算物品嵌入"):
+            batch_ids = items[i:i+batch_size]
+            batch_descriptions = []
+
+            for item_id in batch_ids:
+                item_info = self.item_data[item_id]  # json 格式
+                batch_descriptions.append(item_info)
+
+            with torch.no_grad():
+                content_embeddings = self.cex(batch_descriptions, is_json=True)
+                content_embeddings = content_embeddings.to(self.device)
+                item_embeddings_batch = self.item_transform(content_embeddings)
+                item_embeddings_batch = self.layer_norm(item_embeddings_batch)
+                embeddings.append(item_embeddings_batch.cpu())
+
+        # 如果物品id超出范围，使用一个默认的模型嵌入
+        with torch.no_grad():
+            content_embeddings = self.cex([{"Unknown": "N/A"}], is_json=True)
+            item_embeddings_batch = self.item_transform(content_embeddings)
+            item_embeddings_batch = self.layer_norm(item_embeddings_batch)
+            embeddings.append(item_embeddings_batch.cpu())
+
+        self.item_embeddings = torch.cat(embeddings, dim=0).to(self.device)
+        np.save(self.cache_path, self.item_embeddings.cpu().numpy())
+        print(f">>>> 物品内容嵌入已保存到: {self.cache_path}, 形状: {self.item_embeddings.shape}")
+
     def _precompute_item_embeddings(self):
         """
         预计算所有电影的内容嵌入
         """
-        print("预计算物品内容嵌入...")
+        print(">>>> 预计算物品内容嵌入...")
         if hasattr(self.cex, 'is_meta') and self.cex.is_meta:
             self.cex = self.cex.to_empty(device=self.device)
         else:
@@ -266,24 +321,24 @@ class ItemTower(nn.Module):
         embeddings = []
 
         # 获取所有电影ID
-        items = list(self.movies_data.keys())
+        items = list(self.item_data.keys())
         for i in tqdm(range(0, len(items), batch_size), desc="预计算物品嵌入"):
             batch_ids = items[i:i+batch_size]
             batch_descriptions = []
 
             for item_id in batch_ids:
-                movie_info = self.movies_data.get(item_id, {'title': f'未知电影{item_id}', 'category': '未知类别'})
+                item_info = self.item_data.get(item_id, {'title': f'未知电影{item_id}', 'category': '未知类别'})
                 # 确保movie_info包含所有必要的键
-                if 'brand' not in movie_info:
-                    movie_info['brand'] = 'Unknown'
-                if 'price' not in movie_info:
-                    movie_info['price'] = 'N/A'
-                if 'keywords' not in movie_info:
-                    movie_info['keywords'] = movie_info.get('category', 'Unknown')
-                if 'features' not in movie_info:
-                    movie_info['features'] = 'standard viewing'
+                if 'brand' not in item_info:
+                    item_info['brand'] = 'Unknown'
+                if 'price' not in item_info:
+                    item_info['price'] = 'N/A'
+                if 'keywords' not in item_info:
+                    item_info['keywords'] = item_info.get('category', 'Unknown')
+                if 'features' not in item_info:
+                    item_info['features'] = 'standard viewing'
 
-                batch_descriptions.append(movie_info)
+                batch_descriptions.append(item_info)
 
             with torch.no_grad():
                 # 获取内容嵌入
@@ -298,10 +353,25 @@ class ItemTower(nn.Module):
                 # 添加到结果列表
                 embeddings.append(item_embeddings_batch.cpu())
 
+        # 如果物品id超出范围，使用一个默认的模型嵌入
+        movie_info = {
+            'title': 'Unknown', 
+            'category': 'Unknown',
+            'brand': 'Unknown',
+            'price': 'N/A',
+            'keywords': 'Unknown',
+            'features': 'standard viewing'
+        }
+        with torch.no_grad():
+            content_embeddings = self.cex([movie_info])
+            item_embeddings_batch = self.item_transform(content_embeddings)
+            item_embeddings_batch = self.layer_norm(item_embeddings_batch)
+            embeddings.append(item_embeddings_batch.cpu())
+
         # 合并所有批次的嵌入
         self.item_embeddings = torch.cat(embeddings, dim=0).to(self.device)
         np.save(self.cache_path, self.item_embeddings.cpu().numpy())
-        print(f"物品内容嵌入已保存到: {self.cache_path}")
+        print(f">>>> 物品内容嵌入已保存到: {self.cache_path}, 形状: {self.item_embeddings.shape}")
 
     @staticmethod
     def load_movielens_data(filepath, encoding='ISO-8859-1'):
@@ -350,95 +420,51 @@ class ItemTower(nn.Module):
 
         return movies_data
 
-    def forward(self, item_id):
+    def forward(self, item_ids, type):
         """
         前向传播
 
         Args:
-            item_id (torch.Tensor): 物品ID, 形状为 [batch_size, seq]
+            item_id (torch.Tensor): 物品ID, [1, 3952]
+            type (str): 类型, 'base_model' / 'user_seq' / 'single_item'
 
         Returns:
             item_embedding (torch.Tensor): 物品嵌入，形状为 [batch_size, seq, hidden_factor]，其中 batch_size 为批次大小，seq 为序列长度，hidden_factor 为隐藏层维度
         """
-        # 将item_id减1并转换为索引矩阵
-        item_indices = (item_id - 1).clamp(0, self.item_embeddings.shape[0]-1)
+        if type == 'base_model':
+            batch_size, n_base_model, seq_len = item_ids.shape
+            item_ids_np = item_ids.cpu().numpy()
+            item_ids_flat = item_ids_np.reshape(-1)
+            item_ids_mapped = np.array([self.item_to_idx[str(id)] for id in item_ids_flat])
+            item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
+            item_embeddings = self.item_embeddings[item_indices]
+            item_embeddings = item_embeddings.reshape(batch_size, n_base_model, seq_len, -1)
 
-        # 一次性获取所有物品的嵌入 [batch_size, seq_len, hidden_factor]
-        item_embeddings = self.item_embeddings[item_indices]
+        elif type == 'user_seq':
+            batch_size, seq_len = item_ids.shape
+            item_ids_np = item_ids.cpu().numpy()
+            item_ids_flat = item_ids_np.reshape(-1)
+            item_ids_mapped = np.array([self.item_to_idx[str(id)] for id in item_ids_flat])
+            item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
+            item_embeddings = self.item_embeddings[item_indices]
+            item_embeddings = item_embeddings.reshape(batch_size, seq_len, -1)
 
-        # 将item_embeddings移动到正确的设备
-        item_embeddings = item_embeddings.to(item_id.device)
+        elif type == 'single_item':
+            item_ids_np = item_ids.cpu().numpy()
+            item_ids_mapped = np.array([self.item_to_idx[str(id)] for id in item_ids_np])
+            item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
+            item_embeddings = self.item_embeddings[item_indices]
 
-        # 创建无效ID的掩码 (考虑ID减1后的情况)
-        invalid_mask = (item_id <= 0) | (item_id > self.item_embeddings.shape[0])
-        item_embeddings[invalid_mask] = 0
-
-        # 批量转换物品特征
         item_embeddings = self.item_transform(item_embeddings)
         item_embeddings = self.layer_norm(item_embeddings)
 
         return item_embeddings
 
 
-class UserTower(nn.Module):
-
-    """
-    用户塔
-    结合内容提取模块和偏好对齐模块，生成用户嵌入
-    """
-    def __init__(self, hidden_factor=64, pretrained_model_name="bert-base-uncased", 
-                 max_length=128, num_transformer_layers=12, num_attention_heads=12,
-                 intermediate_size=3072, max_seq_length=50, dropout_rate=0.1):
-        super(UserTower, self).__init__()
-        self.hidden_factor = hidden_factor
-
-        # 内容提取模块
-        self.cex = ContentExtractionModule(
-            hidden_factor=hidden_factor,
-            pretrained_model_name=pretrained_model_name,
-            max_length=max_length
-        )
-
-        # 偏好对齐模块
-        self.pal = PreferenceAlignmentModule(
-            hidden_factor=hidden_factor,
-            num_transformer_layers=num_transformer_layers,
-            num_attention_heads=num_attention_heads,
-            intermediate_size=intermediate_size,
-            max_seq_length=max_seq_length,
-            dropout_rate=dropout_rate
-        )
-
-    def forward(self, item_descriptions_sequence, attention_mask=None):
-        """
-        前向传播
-        
-        Args:
-            item_descriptions_sequence (list): 项目描述序列列表
-            attention_mask (torch.Tensor, optional): 注意力掩码
-            
-        Returns:
-            user_embedding (torch.Tensor): 用户嵌入
-        """
-        batch_size = len(item_descriptions_sequence)
-        seq_length = len(item_descriptions_sequence[0])
-        
-        # 处理每个项目描述，生成内容嵌入序列
-        content_embeddings = []
-        for batch_idx in range(batch_size):
-            batch_embeddings = []
-            for seq_idx in range(seq_length):
-                item_desc = item_descriptions_sequence[batch_idx][seq_idx]
-                embedding = self.cex.process_item_description(item_desc)
-                batch_embeddings.append(embedding)
-            # 堆叠序列中的所有嵌入 [seq_length, hidden_factor]
-            batch_embeddings = torch.cat(batch_embeddings, dim=0)
-            content_embeddings.append(batch_embeddings)
-        
-        # 堆叠所有批次的嵌入 [batch_size, seq_length, hidden_factor]
-        content_embedding_sequence = torch.stack(content_embeddings)
-
-        # 通过偏好对齐模块生成用户嵌入
-        user_embedding = self.pal(content_embedding_sequence, attention_mask)
-        
-        return user_embedding
+if __name__ == "__main__":
+    item_tower = ItemTower(hidden_factor=64, pretrained_model_name="bert-base-uncased", max_length=128,
+                           data_filepath="D:/Code/graduation_design/data/magazine/item.dat",
+                           cache_path="D:/Code/graduation_design/llm_emb/magazine/bert_emb64.npy",
+                           device="cuda", num_transformer_layers=2, num_attention_heads=4,
+                           intermediate_size=256, dropout_rate=0.1)
+    item_tower._precompute_magazine_item_embeddings()

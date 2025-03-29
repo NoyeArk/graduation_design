@@ -1,7 +1,5 @@
-from model.sem import Sem
+from model.aem import AEM
 from model.ensrec import EnsRec
-from model.rankboost import RankBoost
-from model.rmse_rec import RMSESeqLearn
 
 
 def get_model(model_type, args, data_args, n_user, n_item):
@@ -20,11 +18,7 @@ def get_model(model_type, args, data_args, n_user, n_item):
     """
     if model_type == 'bpr_ensrec':
         return EnsRec(args, data_args, n_user)
-    elif model_type == 'RMSE':
-        return RMSESeqLearn(args, data_args, n_user, n_item)
-    elif model_type== 'SEM':
-        return Sem(args, data_args, n_user, n_item)
-    elif model_type == 'rankboost':
-        return RankBoost(args, n_item)
+    elif model_type == 'aem':
+        return AEM(args, data_args, n_user, n_item)
     else:
         raise ValueError(f'不支持的模型类型: {model_type}')

@@ -1,15 +1,15 @@
-# base_path: &base_path "D:/Code/graduation_design/"
-base_path: &base_path "/root/autodl-tmp/graduation_design/"
+base_path: &base_path "D:/Code/graduation_design/"
+# base_path: &base_path "/root/autodl-tmp/graduation_design/"
 
 data:
   sep: "::"
   maxlen: 20
   base_model_topk: 100
   train_test_split: 0.99
-  device: &device "cuda"
-  name: &dataset_name "ml-1m"
+  device: &device "cpu"
+  name: &dataset_name "magazine"
 
-  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "movies.dat"]
+  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item.dat"]
   item_emb_path: !!python/object/apply:os.path.join [*base_path, "llm_emb", *dataset_name, "bert_emb64.npy"]
   path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.dat']
 
@@ -29,17 +29,17 @@ data:
   base_model_path: !!python/object/apply:os.path.join [*base_path, "base_model_results", *dataset_name]
 
 model:
-  name: "bce"
+  name: "bert_bce"
   lr: 0.001
   hidden_dim: 64
   device: *device
-  type: "ensrec"
+  type: "bpr_ensrec"
   n_weak_learners: 10
   pretrain_llm: "bert-base-uncased"
 
   use_div: false
   div_tradeoff: 1
-  use_reg: true
+  use_reg: false
   reg_tradeoff: 1
 
 topk: 10

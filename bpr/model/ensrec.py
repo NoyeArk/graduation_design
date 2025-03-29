@@ -66,8 +66,8 @@ class EnsRec(nn.Module):
         # 计算基模型权重
         # [bc, n_base_model, dim] @ [bc, 1, dim] -> [bc, n_base_model, 1]
         preference = preference.unsqueeze(1).transpose(-2, -1)  # [bc, dim, 1]
-        wgts_org = torch.matmul(basemodel_emb, preference).squeeze(-1)
-        wgts = F.softmax(wgts_org, dim=-1)
+        wgts_org = torch.matmul(basemodel_emb, preference).squeeze(-1)  # [bc, n_base_model]
+        wgts = F.softmax(wgts_org, dim=-1)  # [bc, n_base_model]
 
         if is_test:
             pred_all_item_scores = torch.matmul(wgts.unsqueeze(1), batch['all_item_scores']).squeeze(1)

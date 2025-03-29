@@ -39,17 +39,15 @@ class Data(Dataset):
         self.item_threshold = args['item_threshold']
         self.load_data(args['path'])
 
-        print(self.data)
-
         # 划分训练集和测试集
-        split_index = int(len(self.data) * args['train_test_split'])
-        self.train_data = self.data[:split_index]
-        self.test_data = self.data[split_index:]
+        # split_index = int(len(self.data) * args['train_test_split'])
+        # self.train_data = self.data[:split_index]
+        # self.test_data = self.data[split_index:]
 
-        # [len(train_data) * num_negatives, dict[7]]
-        self.train_samples, self.test_samples = self.generate_samples(seq_len=args['maxlen'], num_negatives=args['num_negatives'])
-        self.train_dataset = SeqBPRDataset(self.train_samples, args['device'])
-        self.test_dataset = SeqBPRDataset(self.test_samples, args['device'], is_test=True)
+        # # [len(train_data) * num_negatives, dict[7]]
+        # self.train_samples, self.test_samples = self.generate_samples(seq_len=args['maxlen'], num_negatives=args['num_negatives'])
+        # self.train_dataset = SeqBPRDataset(self.train_samples, args['device'])
+        # self.test_dataset = SeqBPRDataset(self.test_samples, args['device'], is_test=True)
 
     def load_data(self, data_path):
         """
@@ -95,12 +93,12 @@ class Data(Dataset):
         print(f">>>> 数据加载完成: {len(self.data)} 条交互, {self.n_user} 个用户, {self.n_item} 个物品")
 
         # 加载基模型的预测结果
-        self.base_model_preds = []
-        for base_model in self.args['base_model']:
-            res = np.load(self.args['base_model_path'] + f"/{base_model}.npy")
-            self.base_model_preds.append(res)
-        self.base_model_preds = np.stack(self.base_model_preds, axis=1)
-        print(f">>>> 基模型的预测结果加载完成: {self.base_model_preds.shape}")
+        # self.base_model_preds = []
+        # for base_model in self.args['base_model']:
+        #     res = np.load(self.args['base_model_path'] + f"/{base_model}.npy")
+        #     self.base_model_preds.append(res)
+        # self.base_model_preds = np.stack(self.base_model_preds, axis=1)
+        # print(f">>>> 基模型的预测结果加载完成: {self.base_model_preds.shape}")
 
     def _create_id_mappings(self):
         """创建用户和物品的ID映射"""

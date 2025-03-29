@@ -29,23 +29,23 @@ class TransformerBlock(nn.Module):
 
         # 转置为注意力机制需要的形状 [seq_len, batch_size, hidden_size]
         x = x.transpose(0, 1)
-        
+
         # 创建因果掩码
         seq_len = x.size(0)
         causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device) * float('-inf'), diagonal=1)
-        
+
         # 应用注意力
         if attention_mask is not None:
             # 组合因果掩码和注意力掩码
             attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
             attention_mask = (1.0 - attention_mask) * -10000.0
             causal_mask = causal_mask + attention_mask
-            
+
         x, _ = self.attention(x, x, x, attn_mask=causal_mask)
         x = x.transpose(0, 1)  # 转回 [batch_size, seq_len, hidden_size]
         x = self.dropout(x)
         x = residual + x
-        
+
         # 前馈网络
         residual = x
         x = self.layer_norm2(x)
@@ -115,6 +115,7 @@ class ContentExtractionModule(nn.Module):
 
         # 平均池化
         content_embedding = torch.mean(hidden_states, dim=1)  # [batch_size, hidden_size]
+        # content_embedding = hidden_states[:, -1, :]  # [batch_size, hidden_size]
 
         # 如果需要，进行维度投影
         if self.projection is not None:

@@ -49,3 +49,5 @@ data_npy.zip
 bpr/ckpt_qwen_fixbug_reg/epoch1_0.3919.pth
 bpr/ckpt_sem/sem_epoch3.pth
 ipynb/__pycache__/*
+bce/model/__pycache__/*
+bce/runs/*
