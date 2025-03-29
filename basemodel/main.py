@@ -26,4 +26,4 @@ if __name__ == '__main__':
     }
 
     pipeline = model_mapping[config['model']](config, data)
-    pipeline.train(use_item_attributes=True)
+    pipeline.train(use_item_attributes=False)

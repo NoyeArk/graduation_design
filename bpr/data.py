@@ -9,11 +9,6 @@ from torch.utils.data import Dataset
 
 
 class Data(Dataset):
-    """
-    贝叶斯个性化排序(BPR)样本生成器
-    用于从用户-物品交互数据中构造正负样本对
-    """
-
     def __init__(self, args):
         """
         初始化BPR样本生成器

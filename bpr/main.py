@@ -69,7 +69,7 @@ def train(args, data, model, train_loader, test_loader, optimizer):
 
         if not os.path.exists(f"ckpt_{args['model']['name']}"):
             os.makedirs(f"ckpt_{args['model']['name']}")
-        ckpt_name = f"ckpt_{args['model']['name']}/epoch{epoch+1}_{round(ndcg, 4)}.pth"
+        ckpt_name = f"ckpt_{args['model']['name']}/epoch{epoch+11}_{round(ndcg, 4)}.pth"
         torch.save(model.state_dict(), ckpt_name)
         print(f"模型已保存: {ckpt_name}")
 
@@ -113,5 +113,5 @@ if __name__ == '__main__':
     model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952)
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    # model.load_state_dict(torch.load("ckpt_qwen_fixbug_reg/epoch10_0.3975.pth"))
+    model.load_state_dict(torch.load("ckpt_stacking_multilayer/epoch10_0.4133.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)

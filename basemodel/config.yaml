@@ -11,8 +11,9 @@ lamda:
   harnn: 0.0001
 
 dataset:
-  name: "magazine"
-  path: "D:/Code/graduation_design/data/magazine"
+  sep: ","
+  name: "Office_Products"
+  path: "D:/Code/graduation_design/data/Office_Products"
 
 train:
   factor: 64

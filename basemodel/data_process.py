@@ -1,10 +1,11 @@
 import copy
+import json
+import codecs
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from collections import Counter
 from scipy.sparse import csr_matrix, coo_matrix, lil_matrix, save_npz
-import codecs
-from tqdm import tqdm
 
 leave_num = 1000000000
 remove_rating = 2
@@ -13,8 +14,8 @@ last = 5  # 5 for BMS; 10 for SNR
 
 def relation_dict(n1, n2, list1):
     # 将总数n1，n2的entity转化成映射字典
-    dict_forward = {i:[] for i in range(n1)}
-    dict_reverse = {i:[] for i in range(n2)}
+    dict_forward = {i: [] for i in range(n1)}
+    dict_reverse = {i: [] for i in range(n2)}
     for x, y in list1:
         if y not in dict_forward[x]:
             dict_forward[int(x)].append(int(y))
@@ -32,8 +33,16 @@ def remove_unrating_user_and_rename(tranA, tranB, list1):
 
 
 def reverse_and_map(l):
-    # 做rename，???->n
-    return {v:k for k, v in enumerate(l)}
+    """
+    将列表中的元素反转并映射为索引
+
+    Args:
+        l (`list`): 列表
+
+    Returns:
+        `dict`: 反转并映射为索引的字典
+    """
+    return {v: k for k, v in enumerate(l)}
 
 
 def set_forward(dict1):
@@ -74,6 +83,7 @@ class Data(object):
     """
     def __init__(self, args, seed=0, Markov=False):
         self.name_id = dict()
+        self.args = args
         self.name = args['name']
         self.dir = args['path'] if args['path'][-1] == '/' else args['path'] + '/'
 
@@ -102,7 +112,8 @@ class Data(object):
             'Kindle': (['user', 'item', 'G'], [], ['G'], 50, 50),
             'tiktok': (['user', 'item', 'G'], [], ['G'], 50, 50),
             'ml-1m': (['user', 'item', 'G'], [], ['G'], 10, 10, '.dat'),
-            'magazine': (['user', 'item', 'G'], [], ['G'], 2, 2, '.dat')
+            'magazine': (['user', 'item', 'G'], [], ['G'], 2, 2, '.dat'),
+            'Office_Products': (['user', 'item', 'G'], [], ['G'], 0, 0, '.dat')
         }
 
         if self.name in entity_config:
@@ -257,7 +268,7 @@ class Data(object):
         if data_suffix == '.csv':
             df = pd.read_csv(self.dir + 'ratings.csv')
         elif data_suffix == '.dat':
-            df = pd.read_csv(self.dir + 'interaction.dat', sep='::', names=['userId', 'movieId', 'rating', 'timestamp'], engine='python')
+            df = pd.read_csv(self.dir + 'interaction.dat', sep=self.args['sep'], names=['userId', 'movieId', 'rating', 'timestamp'], engine='python')
         else:
             df = pd.read_csv(self.dir + 'ratings.data', sep='\t', header=None, nrows=leave_num)
         df.columns = ['user', 'item', 'rating', 'time']
@@ -266,7 +277,6 @@ class Data(object):
 
         # 删除评分小于 score 的交互
         df = df[df['rating'] > rating_threshold]
-        print(df[:10])
 
         # 获取用户物品交互列表
         user_item = df[['user', 'item']].values.tolist()
@@ -303,16 +313,19 @@ class Data(object):
         """
         item_entities = []
         file_path = self.dir + subdir
-        print(file_path)
 
         if file_path.endswith('.csv'):
             items = pd.read_csv(file_path, engine='python')
             item_entities = items.iloc[:, :2].values.tolist()  # 只取前两列
             item_entities = [[str(x), str(y)] for x, y in item_entities]
-        elif file_path.endswith('.dat'):
+        elif self.dir.split('/')[-2] == 'ml-1m':
             items = pd.read_csv(file_path, sep='::', names=['movieId', 'title', 'genres'], engine='python', encoding=self.encoding)
             item_entities = items.iloc[:, :2].values.tolist()  # 只取前两列
             item_entities = [[str(x), str(y)] for x, y in item_entities]
+        elif self.dir.split('/')[-2] == 'Office_Products':
+            items = pd.read_csv(file_path, sep='>>', names=['itemId', 'json'], engine='python', on_bad_lines='skip')
+            item_title = items['json'].apply(lambda x: json.loads(x)['title'])
+            item_entities = [[str(itemId), str(title)] for itemId, title in zip(items['itemId'], item_title)]
         else:
             with codecs.open(file_path, 'r', encoding=self.encoding) as rfile:  # iso-8859-15
                 for line in rfile:
@@ -358,7 +371,7 @@ class Data(object):
         others = list(set(others))
         others2id = reverse_and_map(others)
         return remove_unrating_user_and_rename(self.dict_entity2id['user'],others2id,b_other) , others2id,len(others)    
-    
+
     def constrcut_markov_matrices(self, keep=1):
         markov = lil_matrix((self.entity_num['item'], self.entity_num['item']))
 
@@ -391,7 +404,7 @@ class Data(object):
 #                if (len(line)!=2):
 #                    print(line)
 #                b_other.append([str(line[0]),str(line[1])])
-        
+
     def holdout_users(self,test,n):
 #        us,bs = zip(*test)
 #        C_us = Counter(us)

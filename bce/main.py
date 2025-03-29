@@ -84,7 +84,7 @@ def test(data, model, test_loader, topk):
 
             for i in range(len(batch['user_id'])):
                 user_id = batch['user_id'][i].item()
-                pos_item = batch['pos_item'][i].item()
+                pos_item = batch['item'][i].item()
 
                 true_item_ids = data.user_interacted_item_ids[user_id]
                 true_item_ids = true_item_ids[true_item_ids.index(data.item_to_id[pos_item]) + 1:]

@@ -51,3 +51,5 @@ bpr/ckpt_sem/sem_epoch3.pth
 ipynb/__pycache__/*
 bce/model/__pycache__/*
 bce/runs/*
+bce/ckpt_qwen_reg_div_last/*
+bpr/ckpt_stacking_multilayer/*

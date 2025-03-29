@@ -110,7 +110,7 @@ class Pipeline(object):
                         f"NDCG:{test_result[1]:.4f}, PREC:{test_result[2]:.4f} [{time() - t2:.1f}s]\n"
                     )
 
-                if best_metric < np.sum(test_result) and epoch < self.epoch:
+                if best_metric <= np.sum(test_result) and epoch < self.epoch:
                     best_metric = np.sum(test_result)
                     meta_result = self.save_meta_result()
                 else:
@@ -184,7 +184,7 @@ class Pipeline(object):
             attribute = []
             for item in range(self.n_item):
                 list_ = attribute_item[item]
-                if len(list_) <=NUM:
+                if len(list_) <= NUM:
                     attribute.append(list_+[-1 for i in range(NUM-len(list_))])
                 else:
                     attribute.append(list_[:NUM])

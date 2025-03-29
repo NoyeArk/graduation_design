@@ -253,7 +253,7 @@ class ACF(object):
         """
         feed_dict = {
             self.feedback: user_item_feedback,
-            self.item_attributes:all_attributes
+            self.item_attributes: all_attributes
         }
         _, self.prediction = self.sess.run(self.out_all_topk, feed_dict)
         return self.prediction
