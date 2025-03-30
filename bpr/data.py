@@ -20,6 +20,7 @@ class Data(Dataset):
             rating_threshold: 评分阈值，大于等于该值的交互被视为正向交互
         """
         self.data = None
+        self.data_name = args['name']
         self.args = args
         self.user_interacted_item_ids = None
         self.all_items = None
@@ -29,20 +30,27 @@ class Data(Dataset):
         self.id_to_item = {}
 
         self.names = ['user', 'item', 'rating', 'timestamp']
-        self.rating_threshold = args['rating_threshold']
-        self.user_threshold = args['user_threshold']
-        self.item_threshold = args['item_threshold']
+        self.rating_threshold = args[self.data_name]['rating_threshold']
+        self.user_threshold = args[self.data_name]['user_threshold']
+        self.item_threshold = args[self.data_name]['item_threshold']
         self.load_data(args['path'])
 
-        # 划分训练集和测试集
-        # split_index = int(len(self.data) * args['train_test_split'])
-        # self.train_data = self.data[:split_index]
-        # self.test_data = self.data[split_index:]
+        if self.args['is_sample']:
+            self.base_model_preds = []
+            for base_model in self.args['base_model']:
+                res = np.load(self.args['base_model_path'] + f"/{base_model}.npy")
+                self.base_model_preds.append(res)
+            self.base_model_preds = np.stack(self.base_model_preds, axis=1)
+            print(f">>>> 基模型的预测结果加载完成: {self.base_model_preds.shape}")
 
-        # # [len(train_data) * num_negatives, dict[7]]
-        # self.train_samples, self.test_samples = self.generate_samples(seq_len=args['maxlen'], num_negatives=args['num_negatives'])
-        # self.train_dataset = SeqBPRDataset(self.train_samples, args['device'])
-        # self.test_dataset = SeqBPRDataset(self.test_samples, args['device'], is_test=True)
+            split_index = int(len(self.data) * args[self.data_name]['train_test_split'])
+            self.train_data = self.data[:split_index]
+            self.test_data = self.data[split_index:]
+
+            # [len(train_data) * num_negatives, dict[7]]
+            self.train_samples, self.test_samples = self.generate_samples(seq_len=args['maxlen'], num_negatives=args[self.data_name]['num_negatives'])
+            self.train_dataset = SeqBPRDataset(self.train_samples, args['device'])
+            self.test_dataset = SeqBPRDataset(self.test_samples, args['device'], is_test=True)
 
     def load_data(self, data_path):
         """
@@ -53,9 +61,9 @@ class Data(Dataset):
             sep: 数据分隔符
         """
         if 'nrows' in self.args:
-            self.data = pd.read_csv(data_path, sep=self.args['sep'], header=None, engine='python', nrows=self.args['nrows'])
+            self.data = pd.read_csv(data_path, sep=self.args[self.data_name]['sep'], header=None, engine='python', nrows=self.args['nrows'])
         else:
-            self.data = pd.read_csv(data_path, sep=self.args['sep'], header=None, engine='python')
+            self.data = pd.read_csv(data_path, sep=self.args[self.data_name]['sep'], header=None, engine='python')
         self.data.columns = ['user', 'item', 'rating', 'timestamp']
 
         # 过滤评分
@@ -86,14 +94,6 @@ class Data(Dataset):
         self.all_item_ids = set(self.data['item_id'].unique())
 
         print(f">>>> 数据加载完成: {len(self.data)} 条交互, {self.n_user} 个用户, {self.n_item} 个物品")
-
-        # 加载基模型的预测结果
-        # self.base_model_preds = []
-        # for base_model in self.args['base_model']:
-        #     res = np.load(self.args['base_model_path'] + f"/{base_model}.npy")
-        #     self.base_model_preds.append(res)
-        # self.base_model_preds = np.stack(self.base_model_preds, axis=1)
-        # print(f">>>> 基模型的预测结果加载完成: {self.base_model_preds.shape}")
 
     def _create_id_mappings(self):
         """创建用户和物品的ID映射"""
@@ -224,7 +224,7 @@ class Data(Dataset):
 
                 # 获取用户交互过的item之前的seq_len个交互作为历史序列
                 item_idx = items.index(self.id_to_item[item_id])
-                user_history = items[max(0, item_idx - seq_len):item_idx]
+                user_history = item_ids[max(0, item_idx - seq_len):item_idx]
 
                 # 如果历史序列长度不足seq_len，则在前面填充0
                 if len(user_history) < seq_len:
@@ -242,7 +242,7 @@ class Data(Dataset):
         neg_labels = self.label_negative(neg_samples)
 
         train_samples, test_samples = [], []
-        train_size = int(len(user_item_pairs) * self.args['train_test_split'])
+        train_size = int(len(user_item_pairs) * self.args[self.data_name]['train_test_split'])
         test_size = len(user_item_pairs) - train_size
 
         base_model_preds = np.array(base_model_preds).astype(np.int32)
@@ -250,15 +250,20 @@ class Data(Dataset):
         all_scores = self.all_item_score(base_model_preds_test)
 
         # 将 base_model_preds 的索引从 [0, 3122] 转换为 [1, 3952]
-        vectorized_id_map = np.vectorize(lambda x: self.id_to_item[x])
-        base_model_preds = vectorized_id_map(base_model_preds)
+
+        # amazon
+        # vectorized_id_map = np.vectorize(lambda x: self.id_to_item[x])
+        # base_model_preds = vectorized_id_map(base_model_preds)
 
         for i in tqdm(range(train_size), desc=">>>> 构建训练集"):
             train_samples.append({
                 'user_id': user_item_pairs[i][0],  # 用户ID
                 'history_seq': user_seq[i],  # [seq_len]
-                'pos_item': self.id_to_item[user_item_pairs[i][1]],  # 正样本
-                'neg_item': self.id_to_item[neg_samples[i]],  # 负样本
+                # 'pos_item': self.id_to_item[user_item_pairs[i][1]],  # 正样本
+                # 'neg_item': self.id_to_item[neg_samples[i]],  # 负样本
+                # amazon
+                'pos_item': user_item_pairs[i][1],  # 正样本
+                'neg_item': neg_samples[i],  # 负样本
                 'pos_label': pos_labels[i],  # [k]
                 'neg_label': neg_labels[i],  # [k]
                 'base_model_preds': base_model_preds[i]  # [k, seq_len]
@@ -269,8 +274,11 @@ class Data(Dataset):
             test_samples.append({
                 'user_id': user_item_pairs[j][0],  # 用户ID
                 'history_seq': user_seq[j],  # [seq_len]
-                'pos_item': self.id_to_item[user_item_pairs[j][1]],  # 正样本
-                'neg_item': self.id_to_item[neg_samples[j]],  # 负样本
+                # 'pos_item': self.id_to_item[user_item_pairs[j][1]],  # 正样本
+                # 'neg_item': self.id_to_item[neg_samples[j]],  # 负样本
+                # amazon
+                'pos_item': user_item_pairs[j][1],  # 正样本
+                'neg_item': neg_samples[j],  # 负样本
                 'all_item_scores': all_scores[j - train_size],  # [k, all_items]
                 'base_model_preds': base_model_preds[j]  # [k, seq_len]
             })

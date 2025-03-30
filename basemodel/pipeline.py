@@ -113,15 +113,14 @@ class Pipeline(object):
                 if best_metric <= np.sum(test_result) and epoch < self.epoch:
                     best_metric = np.sum(test_result)
                     meta_result = self.save_meta_result()
-                else:
-                    dir_name = f"../base_model_results/{self.args['dataset']['name']}"
-                    if not os.path.isdir(dir_name):
-                        os.makedirs(dir_name)
-                    np.save(
-                        f"../base_model_results/{self.args['dataset']['name']}/{self.args['model']}.npy", 
-                        meta_result
-                    )
-                    break
+
+        dir_name = f"../base_model_results/{self.args['dataset']['name']}"
+        if not os.path.isdir(dir_name):
+            os.makedirs(dir_name)
+        np.save(
+            f"../base_model_results/{self.args['dataset']['name']}/{self.args['model']}.npy", 
+            meta_result
+        )
 
     def save_meta_result(self):
         """

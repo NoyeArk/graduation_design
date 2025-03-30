@@ -102,18 +102,15 @@ class ContentExtractionModule(nn.Module):
                 The item information is given as follows. {item_description}".
             """
 
-        # 对文本进行编码
         inputs = self.tokenizer(prompt, return_tensors="pt", max_length=self.max_length,
                                padding="max_length", truncation=True)
 
         inputs = {k: v.to(self.llm.device) for k, v in inputs.items()}
 
-        # 获取LLM的最终隐藏状态
         with torch.no_grad():
             outputs = self.llm(**inputs)
             hidden_states = outputs.last_hidden_state
 
-        # 平均池化
         content_embedding = torch.mean(hidden_states, dim=1)  # [batch_size, hidden_size]
         # content_embedding = hidden_states[:, -1, :]  # [batch_size, hidden_size]
 
@@ -219,12 +216,12 @@ class ItemTower(nn.Module):
                  data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat",
                  cache_path="D:/Code/graduation_design/data/ml-1m/item_embeddings.npy",
                  device=None, num_transformer_layers=2, num_attention_heads=4,
-                 intermediate_size=256, dropout_rate=0.1):
+                 intermediate_size=256, dropout_rate=0.1, id_to_item=None):
         super(ItemTower, self).__init__()
         self.device = device
         self.cache_path = cache_path
         self.hidden_factor = hidden_factor
-
+        self.id_to_item = id_to_item
         # 物品特征转换层 - 确保输入维度与LLM输出维度匹配
         self.item_transform = nn.Sequential(
             nn.Linear(hidden_factor, hidden_factor),
@@ -243,8 +240,20 @@ class ItemTower(nn.Module):
         )
 
         self.layer_norm = nn.LayerNorm(hidden_factor)
-        self.item_data = self.load_movielens_data(data_filepath)
-        if data_filepath == "D:/Code/graduation_design/data/magazine/item.dat":
+        if data_filepath.split('/')[-2] == "ml-1m":
+            self.item_data = self.load_movielens_data(data_filepath)
+        else:
+            self.item_data = {}
+            with open(data_filepath, 'r') as fp:
+                for line in tqdm(fp):
+                    data = line.strip().split('>>')
+                    item_id = data[0]
+                    if len(data) > 1:
+                        self.item_data[item_id] = data[1]
+                    else:
+                        self.item_data[item_id] = ""
+
+        if data_filepath == "D:/Code/graduation_design/data/Office_Products/new_item.dat":
             self.cex = ContentExtractionModule(
                 hidden_factor=hidden_factor,
                 pretrained_model_name=pretrained_model_name,
@@ -258,7 +267,6 @@ class ItemTower(nn.Module):
         self.item_to_idx = {item_id: idx for idx, item_id in enumerate(list(self.item_data.keys()))}
         self.item_to_idx['0'] = len(self.item_data)
 
-        # 如果缓存路径不存在，则预计算物品嵌入
         if not os.path.exists(self.cache_path):
             self.cex = ContentExtractionModule(
                 hidden_factor=hidden_factor,
@@ -275,7 +283,7 @@ class ItemTower(nn.Module):
         self.item_transform.to(self.device)
         self.layer_norm.to(self.device)
 
-        batch_size = 32
+        batch_size = 512
         embeddings = []
 
         items = list(self.item_data.keys())
@@ -435,7 +443,7 @@ class ItemTower(nn.Module):
             batch_size, n_base_model, seq_len = item_ids.shape
             item_ids_np = item_ids.cpu().numpy()
             item_ids_flat = item_ids_np.reshape(-1)
-            item_ids_mapped = np.array([self.item_to_idx[str(id)] for id in item_ids_flat])
+            item_ids_mapped = np.array([self.item_to_idx.get(str(self.id_to_item[id]), len(self.item_data)) for id in item_ids_flat])
             item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
             item_embeddings = self.item_embeddings[item_indices]
             item_embeddings = item_embeddings.reshape(batch_size, n_base_model, seq_len, -1)
@@ -444,14 +452,14 @@ class ItemTower(nn.Module):
             batch_size, seq_len = item_ids.shape
             item_ids_np = item_ids.cpu().numpy()
             item_ids_flat = item_ids_np.reshape(-1)
-            item_ids_mapped = np.array([self.item_to_idx[str(id)] for id in item_ids_flat])
+            item_ids_mapped = np.array([self.item_to_idx.get(str(self.id_to_item[id]), len(self.item_data)) for id in item_ids_flat])
             item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
             item_embeddings = self.item_embeddings[item_indices]
             item_embeddings = item_embeddings.reshape(batch_size, seq_len, -1)
 
         elif type == 'single_item':
             item_ids_np = item_ids.cpu().numpy()
-            item_ids_mapped = np.array([self.item_to_idx[str(id)] for id in item_ids_np])
+            item_ids_mapped = np.array([self.item_to_idx.get(str(self.id_to_item[id]), len(self.item_data)) for id in item_ids_np])
             item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
             item_embeddings = self.item_embeddings[item_indices]
 
@@ -463,8 +471,8 @@ class ItemTower(nn.Module):
 
 if __name__ == "__main__":
     item_tower = ItemTower(hidden_factor=64, pretrained_model_name="bert-base-uncased", max_length=128,
-                           data_filepath="D:/Code/graduation_design/data/magazine/item.dat",
-                           cache_path="D:/Code/graduation_design/llm_emb/magazine/bert_emb64.npy",
+                           data_filepath="D:/Code/graduation_design/data/Office_Products/new_item.dat",
+                           cache_path="D:/Code/graduation_design/llm_emb/Office_Products/bert_emb64.npy",
                            device="cuda", num_transformer_layers=2, num_attention_heads=4,
                            intermediate_size=256, dropout_rate=0.1)
     item_tower._precompute_magazine_item_embeddings()

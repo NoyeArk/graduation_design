@@ -2,38 +2,48 @@ base_path: &base_path "D:/Code/graduation_design/"
 # base_path: &base_path "/root/autodl-tmp/graduation_design/"
 
 data:
-  sep: "::"
   maxlen: 20
+  is_sample: true
   base_model_topk: 100
-  train_test_split: 0.99
   device: &device "cpu"
-  name: &dataset_name "ml-1m"
+  name: &dataset_name "Office_Products"
 
-  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item.dat"]
+  ml-1m:
+    sep: "::"
+    train_test_split: 0.99
+    num_negatives: 1
+    user_threshold: 10
+    item_threshold: 10
+    rating_threshold: 2
+
+  Office_Products:
+    sep: ","
+    train_test_split: 0.8
+    num_negatives: 1
+    user_threshold: 10
+    item_threshold: 1
+    rating_threshold: 2
+
+  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "new_item.dat"]
   item_emb_path: !!python/object/apply:os.path.join [*base_path, "llm_emb", *dataset_name, "bert_emb64.npy"]
   path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.dat']
-
-  num_negatives: 1
-  user_threshold: 10
-  item_threshold: 10
-  rating_threshold: 2
 
   base_model:
     - "acf"
     - "fdsa"
     - "harnn"
-    - "caser"
+    # - "caser"
     - "pfmc"
     - "sasrec"
     - "anam"
   base_model_path: !!python/object/apply:os.path.join [*base_path, "base_model_results", *dataset_name]
 
 model:
-  name: "stacking_multilayer"
+  name: "ensrec_amazon"
+  type: "ensrec"
   lr: 0.001
   hidden_dim: 64
   device: *device
-  type: "stacking"
   n_weak_learners: 10
   pretrain_llm: "bert-base-uncased"
 

@@ -7,7 +7,7 @@ from module.learn import ItemTower
 
 
 class EnsRec(nn.Module):
-    def __init__(self, args, data_args, n_user):
+    def __init__(self, args, data_args, n_user, id_to_item):
         super(EnsRec, self).__init__()
         self.args = args
         self.data_args = data_args
@@ -26,7 +26,8 @@ class EnsRec(nn.Module):
                                    max_length=self.data_args['maxlen'],
                                    data_filepath=f"{self.data_args['item_path']}",
                                    cache_path=f"{self.data_args['item_emb_path']}",
-                                   device=self.device)
+                                   device=self.device,
+                                   id_to_item=id_to_item)
         self.llm_projection = nn.Linear(self.item_tower.item_embeddings.shape[-1], self.hidden_dim)
 
         self.to(self.device)
@@ -48,13 +49,11 @@ class EnsRec(nn.Module):
         Returns:
             `dict`: 包含损失和预测结果的字典
         """
-        # user 侧
         user_emb = self.user_embeddings(batch['user_id'])  # bc, dim
         user_interaction = self.item_tower(batch['user_seq'], 'user_seq')  # bc, seq_len, dim
         target_emb = self.item_tower(batch['pos_item'], 'single_item')  # bc, dim
         preference = self.dien(user_interaction, target_emb) + user_emb  # bc, dim
 
-        # item 侧
         base_model_focus_llm = self.item_tower(batch['base_model_preds'], 'base_model')  # bc, n_base_model, seq_len, dim
         basemodel_emb = self.llm_projection(base_model_focus_llm)  # bc, n_base_model, seq_len, dim
 
@@ -73,10 +72,8 @@ class EnsRec(nn.Module):
             pred_all_item_scores = torch.matmul(wgts.unsqueeze(1), batch['all_item_scores']).squeeze(1)
             return pred_all_item_scores
 
-        # 计算正负样本得分
         pos_scores = torch.sum(batch['pos_label'] * wgts, dim=1)  # bc
         neg_scores = torch.sum(batch['neg_label'] * wgts, dim=1)  # bc
-
         loss = -torch.sum(torch.log(torch.sigmoid(pos_scores - neg_scores)))
 
         if self.args['use_div']:

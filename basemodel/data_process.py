@@ -113,7 +113,8 @@ class Data(object):
             'tiktok': (['user', 'item', 'G'], [], ['G'], 50, 50),
             'ml-1m': (['user', 'item', 'G'], [], ['G'], 10, 10, '.dat'),
             'magazine': (['user', 'item', 'G'], [], ['G'], 2, 2, '.dat'),
-            'Office_Products': (['user', 'item', 'G'], [], ['G'], 0, 0, '.dat')
+            'Office_Products': (['user', 'item', 'G'], [], ['G'], 0, 0, '.dat'),
+            'kuairec': (['user', 'item', 'G'], [], ['G'], 0, 0, '.dat')
         }
 
         if self.name in entity_config:
@@ -276,7 +277,7 @@ class Data(object):
         df = df.sort_values(['user', 'time'])  # sort for user and time
 
         # 删除评分小于 score 的交互
-        df = df[df['rating'] > rating_threshold]
+        # df = df[df['rating'] > rating_threshold]
 
         # 获取用户物品交互列表
         user_item = df[['user', 'item']].values.tolist()
@@ -326,6 +327,10 @@ class Data(object):
             items = pd.read_csv(file_path, sep='>>', names=['itemId', 'json'], engine='python', on_bad_lines='skip')
             item_title = items['json'].apply(lambda x: json.loads(x)['title'])
             item_entities = [[str(itemId), str(title)] for itemId, title in zip(items['itemId'], item_title)]
+        elif self.dir.split('/')[-2] == 'kuairec':
+            items = pd.read_csv(file_path, sep='\t', names=['itemId', 'title'], engine='python')
+            item_entities = items.iloc[:, :2].values.tolist()  # 只取前两列
+            item_entities = [[str(x), str(y)] for x, y in item_entities]
         else:
             with codecs.open(file_path, 'r', encoding=self.encoding) as rfile:  # iso-8859-15
                 for line in rfile:
@@ -381,7 +386,7 @@ class Data(object):
                  if item_p >= 0:
                      markov[item_p, item] += 1
         return markov
-    
+
     def pic_feature(self,name,dims=64):
         pic_feature = np.zeros([self.entity_num['item'],dims])
         #read feature
@@ -396,19 +401,8 @@ class Data(object):
                 if item in self.dict_entity2id['item']:
                     pic_feature[self.dict_entity2id['item'][item]] = feature[idx]
         return pic_feature
-        
-#                if self.name in ['ml100k']:
-#                    line = line.strip().split(',')   
-#                if self.name in ['ML', 'CiaoDVD','Amazon_App','dianping']:
-#                    line = line.strip().split('\t')  
-#                if (len(line)!=2):
-#                    print(line)
-#                b_other.append([str(line[0]),str(line[1])])
 
     def holdout_users(self,test,n):
-#        us,bs = zip(*test)
-#        C_us = Counter(us)
-#        u_num =np.array([ list(C_us.keys()),list(C_us.values())],dtype=np.int)
         ret = []
         for ui in test:
             if ui[0] >n:

@@ -1,6 +1,6 @@
 seed: 0
 neighbor_cnt: 5
-model: "sasrec"
+model: "anam"
 
 lamda:
   acf: 0.001
@@ -12,8 +12,8 @@ lamda:
 
 dataset:
   sep: ","
-  name: "Office_Products"
-  path: "D:/Code/graduation_design/data/Office_Products"
+  name: "kuairec"
+  path: "D:/Code/graduation_design/data/kuairec"
 
 train:
   factor: 64

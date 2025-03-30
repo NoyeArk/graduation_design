@@ -1,4 +1,5 @@
 import os
+import sys
 import yaml
 import torch
 import numpy as np
@@ -31,7 +32,6 @@ def nDCG(rec_items, test_set):
 
 
 def train(args, data, model, train_loader, test_loader, optimizer):
-    # 冻结LLM参数
     for name, param in model.named_parameters():
         if name.startswith('cem.llm'):
             param.requires_grad = False
@@ -69,7 +69,7 @@ def train(args, data, model, train_loader, test_loader, optimizer):
 
         if not os.path.exists(f"ckpt_{args['model']['name']}"):
             os.makedirs(f"ckpt_{args['model']['name']}")
-        ckpt_name = f"ckpt_{args['model']['name']}/epoch{epoch+11}_{round(ndcg, 4)}.pth"
+        ckpt_name = f"ckpt_{args['model']['name']}/epoch{epoch+1}_{round(ndcg, 4)}.pth"
         torch.save(model.state_dict(), ckpt_name)
         print(f"模型已保存: {ckpt_name}")
 
@@ -81,14 +81,15 @@ def test(data, model, test_loader, topk):
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="计算测试集指标"):
             all_scores = model(batch, is_test=True)
-            scores, indices = torch.topk(all_scores, topk)
+            _, indices = torch.topk(all_scores, topk)
 
             for i in range(len(batch['user_id'])):
                 user_id = batch['user_id'][i].item()
                 pos_item = batch['pos_item'][i].item()
 
                 true_item_ids = data.user_interacted_item_ids[user_id]
-                true_item_ids = true_item_ids[true_item_ids.index(data.item_to_id[pos_item]) + 1:]
+                # true_item_ids = true_item_ids[true_item_ids.index(data.item_to_id[pos_item]) + 1:]
+                true_item_ids = true_item_ids[true_item_ids.index(pos_item) + 1:]
 
                 predicted_item_ids = np.array([indices[i].cpu().numpy().tolist()])
                 ndcg = nDCG(np.array(predicted_item_ids), [true_item_ids])
@@ -98,20 +99,20 @@ def test(data, model, test_loader, topk):
 
 
 if __name__ == '__main__':
-    with open("config/bert_config.yaml", 'r', encoding='utf-8') as f:
+    with open(f"config/{sys.argv[1]}", 'r', encoding='utf-8') as f:
         args = yaml.unsafe_load(f)
     print(args)
 
     data = Data(args['data'])
-    train_samples = np.load('datasets/new_train_samples.npy', allow_pickle=True)
-    test_samples = np.load('datasets/new_test_samples.npy', allow_pickle=True)
-    train_dataset = SeqBPRDataset(train_samples, args['data']['device'])
-    test_dataset = SeqBPRDataset(test_samples, args['data']['device'], is_test=True)
-    train_loader = DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False)
+    # train_samples = np.load(f'datasets/{args["data"]["name"]}/train_samples.npy', allow_pickle=True)
+    # test_samples = np.load(f'datasets/{args["data"]["name"]}/test_samples.npy', allow_pickle=True)
+    # train_dataset = SeqBPRDataset(train_samples, args['data']['device'])
+    # test_dataset = SeqBPRDataset(test_samples, args['data']['device'], is_test=True)
+    train_loader = DataLoader(data.train_dataset, batch_size=args['batch_size'], shuffle=True)
+    test_loader = DataLoader(data.test_dataset, batch_size=args['batch_size'], shuffle=False)
 
-    model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952)
+    model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952, data.id_to_item)
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    model.load_state_dict(torch.load("ckpt_stacking_multilayer/epoch10_0.4133.pth"))
+    # model.load_state_dict(torch.load("ckpt_stacking_multilayer/epoch10_0.4133.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)

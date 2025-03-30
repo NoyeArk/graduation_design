@@ -15,7 +15,7 @@ if __name__ == '__main__':
         config = yaml.safe_load(f)
     data = Data(config['dataset'], config['seed'])
 
-    model_mapping = {
+    model_map = {
         'acf': AcfTrain,
         'pfmc': PfmcTrain,
         'fdsa': FdsaTrain,
@@ -24,6 +24,15 @@ if __name__ == '__main__':
         'anam': AnamTrain,
         'sasrec': SasrecTrain
     }
+    item_attribute_map = {
+        'acf': True,
+        'pfmc': False,
+        'fdsa': True,
+        'caser': False,
+        'harnn': True,
+        'anam': True,
+        'sasrec': False
+    }
 
-    pipeline = model_mapping[config['model']](config, data)
-    pipeline.train(use_item_attributes=False)
+    pipeline = model_map[config['model']](config, data)
+    pipeline.train(use_item_attributes=item_attribute_map[config['model']])
