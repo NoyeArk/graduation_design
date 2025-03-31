@@ -26,3 +26,4 @@ bce/runs/*
 bpr/ml_ckpt/*
 bce/ckpt_qwen_reg_div_last/*
 bpr/ckpt_ensrec_amazon/*
+bpr/ckpt_ensrec_kuairec/*

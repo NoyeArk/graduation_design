@@ -69,7 +69,7 @@ def train(args, data, model, train_loader, test_loader, optimizer):
 
         if not os.path.exists(f"ckpt_{args['model']['name']}"):
             os.makedirs(f"ckpt_{args['model']['name']}")
-        ckpt_name = f"ckpt_{args['model']['name']}/epoch{epoch+1}_{round(ndcg, 4)}.pth"
+        ckpt_name = f"ckpt_{args['model']['name']}/epoch{epoch+11}_{round(ndcg, 4)}.pth"
         torch.save(model.state_dict(), ckpt_name)
         print(f"模型已保存: {ckpt_name}")
 
@@ -88,8 +88,8 @@ def test(data, model, test_loader, topk):
                 pos_item = batch['pos_item'][i].item()
 
                 true_item_ids = data.user_interacted_item_ids[user_id]
-                # true_item_ids = true_item_ids[true_item_ids.index(data.item_to_id[pos_item]) + 1:]
-                true_item_ids = true_item_ids[true_item_ids.index(pos_item) + 1:]
+                true_item_ids = true_item_ids[true_item_ids.index(data.item_to_id[pos_item]) + 1:]
+                # true_item_ids = true_item_ids[true_item_ids.index(pos_item) + 1:]
 
                 predicted_item_ids = np.array([indices[i].cpu().numpy().tolist()])
                 ndcg = nDCG(np.array(predicted_item_ids), [true_item_ids])
@@ -104,15 +104,15 @@ if __name__ == '__main__':
     print(args)
 
     data = Data(args['data'])
-    # train_samples = np.load(f'datasets/{args["data"]["name"]}/train_samples.npy', allow_pickle=True)
-    # test_samples = np.load(f'datasets/{args["data"]["name"]}/test_samples.npy', allow_pickle=True)
-    # train_dataset = SeqBPRDataset(train_samples, args['data']['device'])
-    # test_dataset = SeqBPRDataset(test_samples, args['data']['device'], is_test=True)
-    train_loader = DataLoader(data.train_dataset, batch_size=args['batch_size'], shuffle=True)
-    test_loader = DataLoader(data.test_dataset, batch_size=args['batch_size'], shuffle=False)
+    train_samples = np.load(f'datasets/{args["data"]["name"]}/train_samples.npy', allow_pickle=True)
+    test_samples = np.load(f'datasets/{args["data"]["name"]}/test_samples.npy', allow_pickle=True)
+    train_dataset = SeqBPRDataset(train_samples, args['data']['device'])
+    test_dataset = SeqBPRDataset(test_samples, args['data']['device'], is_test=True)
+    train_loader = DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False)
 
     model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952, data.id_to_item)
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    # model.load_state_dict(torch.load("ckpt_stacking_multilayer/epoch10_0.4133.pth"))
+    model.load_state_dict(torch.load("ckpt_ensrec_kuairec/epoch10_0.4597.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)

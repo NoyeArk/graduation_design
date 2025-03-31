@@ -182,7 +182,7 @@ class CaserTrain(Pipeline):
         )
 
     def train(self, use_item_attributes):
-        MAP_valid = 0
+        MAP_valid = -float('inf')
         if self.include_valid == True:
             train_data = np.array(self.data.train_set) # Array形式的二元组（user,item），none * 2
             basemodel = 'basemodel_v'
@@ -220,6 +220,5 @@ class CaserTrain(Pipeline):
                 if MAP_valid < np.sum(init_test_TopK_test) and epoch<self.epoch:
                     MAP_valid = np.sum(init_test_TopK_test)
                     self.meta_result = self.save_meta_result()
-                else:
-                    np.save("D:/Code/graduation_design/base_model_results/%s/caser.npy"%(self.args['dataset']['name']),self.meta_result)
-                    break
+
+        np.save("D:/Code/graduation_design/base_model_results/%s/caser.npy"%(self.args['dataset']['name']),self.meta_result)

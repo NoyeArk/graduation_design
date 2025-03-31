@@ -1,6 +1,7 @@
 import os
 import torch
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 import torch.nn as nn
 from transformers import AutoModel, AutoTokenizer
@@ -209,9 +210,6 @@ class PreferenceAlignmentModule(nn.Module):
 
 
 class ItemTower(nn.Module):
-    """
-    物品塔，处理物品特征并生成物品嵌入
-    """
     def __init__(self, hidden_factor=64, pretrained_model_name="bert-base-uncased", max_length=128,
                  data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat",
                  cache_path="D:/Code/graduation_design/data/ml-1m/item_embeddings.npy",
@@ -222,14 +220,12 @@ class ItemTower(nn.Module):
         self.cache_path = cache_path
         self.hidden_factor = hidden_factor
         self.id_to_item = id_to_item
-        # 物品特征转换层 - 确保输入维度与LLM输出维度匹配
         self.item_transform = nn.Sequential(
             nn.Linear(hidden_factor, hidden_factor),
             nn.ReLU(),
             nn.Linear(hidden_factor, hidden_factor)
         )
 
-        # 添加PreferenceAlignmentModule用于进一步处理物品嵌入
         self.preference_alignment = PreferenceAlignmentModule(
             hidden_factor=hidden_factor,
             num_transformer_layers=num_transformer_layers,
@@ -242,7 +238,10 @@ class ItemTower(nn.Module):
         self.layer_norm = nn.LayerNorm(hidden_factor)
         if data_filepath.split('/')[-2] == "ml-1m":
             self.item_data = self.load_movielens_data(data_filepath)
-        else:
+        elif data_filepath.split('\\')[-2] == "kuairec":
+            data_filepath = "D:/Code/graduation_design/data/kuairec/data/kuairec_caption_category.csv"
+            self.item_data = self.load_kuairec_data(data_filepath)
+        elif data_filepath.split('/')[-2] == "Office_Products":
             self.item_data = {}
             with open(data_filepath, 'r') as fp:
                 for line in tqdm(fp):
@@ -252,18 +251,9 @@ class ItemTower(nn.Module):
                         self.item_data[item_id] = data[1]
                     else:
                         self.item_data[item_id] = ""
+        else:
+            raise ValueError(f"Unsupported dataset: {data_filepath}")
 
-        if data_filepath == "D:/Code/graduation_design/data/Office_Products/new_item.dat":
-            self.cex = ContentExtractionModule(
-                hidden_factor=hidden_factor,
-                pretrained_model_name=pretrained_model_name,
-                max_length=max_length
-            )
-            self.item_data = {}
-            with open(data_filepath, 'r') as fp:
-                for line in tqdm(fp):
-                    item_id = line.strip().split('::')[0]
-                    self.item_data[item_id] = line.strip().split('::')[1]
         self.item_to_idx = {item_id: idx for idx, item_id in enumerate(list(self.item_data.keys()))}
         self.item_to_idx['0'] = len(self.item_data)
 
@@ -278,12 +268,12 @@ class ItemTower(nn.Module):
             print(">>>> 加载预计算的物品嵌入...")
             self.item_embeddings = torch.from_numpy(np.load(self.cache_path)).float().to(self.device)
 
-    def _precompute_magazine_item_embeddings(self):
+    def _precompute_item_embeddings(self):
         self.cex = self.cex.to(self.device)
         self.item_transform.to(self.device)
         self.layer_norm.to(self.device)
 
-        batch_size = 512
+        batch_size = 64
         embeddings = []
 
         items = list(self.item_data.keys())
@@ -313,10 +303,7 @@ class ItemTower(nn.Module):
         np.save(self.cache_path, self.item_embeddings.cpu().numpy())
         print(f">>>> 物品内容嵌入已保存到: {self.cache_path}, 形状: {self.item_embeddings.shape}")
 
-    def _precompute_item_embeddings(self):
-        """
-        预计算所有电影的内容嵌入
-        """
+    def _precompute_movie_embeddings(self):
         print(">>>> 预计算物品内容嵌入...")
         if hasattr(self.cex, 'is_meta') and self.cex.is_meta:
             self.cex = self.cex.to_empty(device=self.device)
@@ -328,37 +315,20 @@ class ItemTower(nn.Module):
         batch_size = 32
         embeddings = []
 
-        # 获取所有电影ID
         items = list(self.item_data.keys())
         for i in tqdm(range(0, len(items), batch_size), desc="预计算物品嵌入"):
             batch_ids = items[i:i+batch_size]
             batch_descriptions = []
 
             for item_id in batch_ids:
-                item_info = self.item_data.get(item_id, {'title': f'未知电影{item_id}', 'category': '未知类别'})
-                # 确保movie_info包含所有必要的键
-                if 'brand' not in item_info:
-                    item_info['brand'] = 'Unknown'
-                if 'price' not in item_info:
-                    item_info['price'] = 'N/A'
-                if 'keywords' not in item_info:
-                    item_info['keywords'] = item_info.get('category', 'Unknown')
-                if 'features' not in item_info:
-                    item_info['features'] = 'standard viewing'
-
+                item_info = self.item_data[item_id]
                 batch_descriptions.append(item_info)
 
             with torch.no_grad():
-                # 获取内容嵌入
                 content_embeddings = self.cex(batch_descriptions)  # 使用forward方法处理批次
-                # 确保content_embeddings在正确的设备上
                 content_embeddings = content_embeddings.to(self.device)
-
-                # 应用物品特征转换
                 item_embeddings_batch = self.item_transform(content_embeddings)
                 item_embeddings_batch = self.layer_norm(item_embeddings_batch)
-
-                # 添加到结果列表
                 embeddings.append(item_embeddings_batch.cpu())
 
         # 如果物品id超出范围，使用一个默认的模型嵌入
@@ -376,7 +346,6 @@ class ItemTower(nn.Module):
             item_embeddings_batch = self.layer_norm(item_embeddings_batch)
             embeddings.append(item_embeddings_batch.cpu())
 
-        # 合并所有批次的嵌入
         self.item_embeddings = torch.cat(embeddings, dim=0).to(self.device)
         np.save(self.cache_path, self.item_embeddings.cpu().numpy())
         print(f">>>> 物品内容嵌入已保存到: {self.cache_path}, 形状: {self.item_embeddings.shape}")
@@ -394,39 +363,61 @@ class ItemTower(nn.Module):
             dict, 电影ID到电影信息的映射字典
         """
         movies_data = {}
-        try:
-            with open(filepath, 'r', encoding=encoding) as f:
-                for line in f:
-                    parts = line.strip().split('::')
-                    if len(parts) == 3:
-                        movie_id = parts[0]
-                        title_with_year = parts[1]
-                        categories = parts[2].split('|')
+        with open(filepath, 'r', encoding=encoding) as f:
+            for line in f:
+                parts = line.strip().split('::')
+                if len(parts) == 3:
+                    movie_id = parts[0]
+                    title_with_year = parts[1]
+                    categories = parts[2].split('|')
 
-                        # 从标题中提取年份
-                        year = None
-                        title = title_with_year
-                        if '(' in title_with_year and ')' in title_with_year:
-                            year_start = title_with_year.rfind('(')
-                            year_end = title_with_year.rfind(')')
-                            if year_start < year_end:
-                                year_str = title_with_year[year_start+1:year_end]
-                                if year_str.isdigit():
-                                    year = year_str
-                                    title = title_with_year[:year_start].strip()
+                    # 从标题中提取年份
+                    year = None
+                    title = title_with_year
+                    if '(' in title_with_year and ')' in title_with_year:
+                        year_start = title_with_year.rfind('(')
+                        year_end = title_with_year.rfind(')')
+                        if year_start < year_end:
+                            year_str = title_with_year[year_start+1:year_end]
+                            if year_str.isdigit():
+                                year = year_str
+                                title = title_with_year[:year_start].strip()
 
-                        movies_data[movie_id] = {
-                            'title': title,
-                            'category': categories[0] if categories else None,
-                            'keywords': ', '.join(categories)  # 使用类别作为关键词
-                        }
+                    movies_data[movie_id] = {
+                        'title': title,
+                        'category': categories[0] if categories else None,
+                        'keywords': ', '.join(categories)  # 使用类别作为关键词
+                    }
 
-                        if year:
-                            movies_data[movie_id]['year'] = year
-        except Exception as e:
-            print(f"加载MovieLens数据失败: {e}")
+                    if year:
+                        movies_data[movie_id]['year'] = year
 
         return movies_data
+    
+    @staticmethod
+    def load_kuairec_data(filepath, encoding='utf-8'):
+        df = pd.read_csv(filepath, encoding=encoding)
+        video_data = {}
+
+        for index, row in df.iterrows():
+            video_id = row['video_id']
+            manual_cover_text = row['manual_cover_text'] if pd.notna(row['manual_cover_text']) else ''
+            caption = row['caption'] if pd.notna(row['caption']) else ''
+            topic_tag = row['topic_tag'] if pd.notna(row['topic_tag']) else []
+            first_level_category_name = row['first_level_category_name'] if pd.notna(row['first_level_category_name']) else None
+            second_level_category_name = row['second_level_category_name'] if pd.notna(row['second_level_category_name']) else None
+            third_level_category_name = row['third_level_category_name'] if pd.notna(row['third_level_category_name']) else None
+
+            video_data[video_id] = {
+                'manual_cover_text': manual_cover_text,
+                'caption': caption,
+                'topic_tag': topic_tag,
+                'first_level_category_name': first_level_category_name,
+                'second_level_category_name': second_level_category_name,
+                'third_level_category_name': third_level_category_name
+            }
+
+        return video_data
 
     def forward(self, item_ids, type):
         """
@@ -443,7 +434,8 @@ class ItemTower(nn.Module):
             batch_size, n_base_model, seq_len = item_ids.shape
             item_ids_np = item_ids.cpu().numpy()
             item_ids_flat = item_ids_np.reshape(-1)
-            item_ids_mapped = np.array([self.item_to_idx.get(str(self.id_to_item[id]), len(self.item_data)) for id in item_ids_flat])
+            # item_ids_mapped = np.array([self.item_to_idx.get(str(self.id_to_item[id]), len(self.item_data)) for id in item_ids_flat])
+            item_ids_mapped = np.array([self.item_to_idx[str(id)] for id in item_ids_flat])
             item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
             item_embeddings = self.item_embeddings[item_indices]
             item_embeddings = item_embeddings.reshape(batch_size, n_base_model, seq_len, -1)
@@ -452,14 +444,16 @@ class ItemTower(nn.Module):
             batch_size, seq_len = item_ids.shape
             item_ids_np = item_ids.cpu().numpy()
             item_ids_flat = item_ids_np.reshape(-1)
-            item_ids_mapped = np.array([self.item_to_idx.get(str(self.id_to_item[id]), len(self.item_data)) for id in item_ids_flat])
+            # item_ids_mapped = np.array([self.item_to_idx.get(str(self.id_to_item[id]), len(self.item_data)) for id in item_ids_flat])
+            item_ids_mapped = np.array([self.item_to_idx[str(id)] for id in item_ids_flat])
             item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
             item_embeddings = self.item_embeddings[item_indices]
             item_embeddings = item_embeddings.reshape(batch_size, seq_len, -1)
 
         elif type == 'single_item':
             item_ids_np = item_ids.cpu().numpy()
-            item_ids_mapped = np.array([self.item_to_idx.get(str(self.id_to_item[id]), len(self.item_data)) for id in item_ids_np])
+            # item_ids_mapped = np.array([self.item_to_idx.get(str(self.id_to_item[id]), len(self.item_data)) for id in item_ids_np])
+            item_ids_mapped = np.array([self.item_to_idx[str(id)] for id in item_ids_np])
             item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
             item_embeddings = self.item_embeddings[item_indices]
 
@@ -471,8 +465,8 @@ class ItemTower(nn.Module):
 
 if __name__ == "__main__":
     item_tower = ItemTower(hidden_factor=64, pretrained_model_name="bert-base-uncased", max_length=128,
-                           data_filepath="D:/Code/graduation_design/data/Office_Products/new_item.dat",
-                           cache_path="D:/Code/graduation_design/llm_emb/Office_Products/bert_emb64.npy",
+                           data_filepath="D:/Code/graduation_design/data/kuairec/data/kuairec_caption_category.csv",
+                           cache_path="D:/Code/graduation_design/llm_emb/kuairec/bert_emb64.npy",
                            device="cuda", num_transformer_layers=2, num_attention_heads=4,
                            intermediate_size=256, dropout_rate=0.1)
-    item_tower._precompute_magazine_item_embeddings()
+    item_tower._precompute_item_embeddings()
