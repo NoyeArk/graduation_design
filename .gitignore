@@ -16,7 +16,6 @@ bpr/__pycache__/*
 bpr/model/__pycache__/*
 bpr/datasets/*
 bpr/runs/*
-llm_emb/*
 bce/__pycache__/*
 bce/model/__pycache__/*
 bce/module/__pycache__/*
