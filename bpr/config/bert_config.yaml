@@ -6,7 +6,7 @@ data:
   is_sample: false
   base_model_topk: 100
   device: &device "cuda"
-  name: &dataset_name "kuairec"
+  name: &dataset_name "Toys_and_Games"
 
   ml-1m:
     sep: "::"
@@ -16,13 +16,13 @@ data:
     item_threshold: 10
     rating_threshold: 2
 
-  Office_Products:
+  Toys_and_Games:
     sep: ","
-    train_test_split: 0.8
+    train_test_split: 0.9
     num_negatives: 1
-    user_threshold: 10
-    item_threshold: 1
-    rating_threshold: 2
+    user_threshold: 0
+    item_threshold: 0
+    rating_threshold: 0
 
   kuairec:
     sep: ","
@@ -32,9 +32,9 @@ data:
     item_threshold: 0
     rating_threshold: 0
 
-  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "new_item.dat"]
+  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item.csv"]
   item_emb_path: !!python/object/apply:os.path.join [*base_path, "llm_emb", *dataset_name, "bert_emb64.npy"]
-  path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.dat']
+  path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.csv']
 
   base_model:
     - "acf"
@@ -47,7 +47,7 @@ data:
   base_model_path: !!python/object/apply:os.path.join [*base_path, "base_model_results", *dataset_name]
 
 model:
-  name: "ensrec_kuairec"
+  name: "bert_amazon"
   type: "ensrec"
   lr: 0.001
   hidden_dim: 64
@@ -55,7 +55,7 @@ model:
   n_weak_learners: 10
   pretrain_llm: "bert-base-uncased"
 
-  use_div: false
+  use_div: true
   div_tradeoff: 1
   use_reg: true
   reg_tradeoff: 1

@@ -1,6 +1,6 @@
 seed: 0
 neighbor_cnt: 5
-model: "caser"
+model: "sasrec"
 
 lamda:
   acf: 0.001
@@ -12,8 +12,8 @@ lamda:
 
 dataset:
   sep: ","
-  name: "kuairec"
-  path: "D:/Code/graduation_design/data/kuairec"
+  name: "Toys_and_Games"
+  path: "D:/Code/graduation_design/data/Toys_and_Games"
 
 train:
   factor: 64

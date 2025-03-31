@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import numpy as np
 import pandas as pd
@@ -238,9 +239,11 @@ class ItemTower(nn.Module):
         self.layer_norm = nn.LayerNorm(hidden_factor)
         if data_filepath.split('/')[-2] == "ml-1m":
             self.item_data = self.load_movielens_data(data_filepath)
-        elif data_filepath.split('\\')[-2] == "kuairec":
+        elif data_filepath.split('/')[-2] == "kuairec":
             data_filepath = "D:/Code/graduation_design/data/kuairec/data/kuairec_caption_category.csv"
             self.item_data = self.load_kuairec_data(data_filepath)
+        elif data_filepath.split('\\')[-2] == "Toys_and_Games":
+            self.item_data = self.load_amazon_data(data_filepath)
         elif data_filepath.split('/')[-2] == "Office_Products":
             self.item_data = {}
             with open(data_filepath, 'r') as fp:
@@ -254,7 +257,7 @@ class ItemTower(nn.Module):
         else:
             raise ValueError(f"Unsupported dataset: {data_filepath}")
 
-        self.item_to_idx = {item_id: idx for idx, item_id in enumerate(list(self.item_data.keys()))}
+        self.item_to_idx = {str(item_id): idx for idx, item_id in enumerate(list(self.item_data.keys()))}
         self.item_to_idx['0'] = len(self.item_data)
 
         if not os.path.exists(self.cache_path):
@@ -349,6 +352,28 @@ class ItemTower(nn.Module):
         self.item_embeddings = torch.cat(embeddings, dim=0).to(self.device)
         np.save(self.cache_path, self.item_embeddings.cpu().numpy())
         print(f">>>> 物品内容嵌入已保存到: {self.cache_path}, 形状: {self.item_embeddings.shape}")
+
+    @staticmethod
+    def load_amazon_data(filepath, encoding='utf-8'):
+        item_data = {}
+        with open(filepath, 'r', encoding=encoding) as fp:
+            for line in tqdm(fp):
+                data = json.loads(line.strip())
+                item_id = data['parent_asin']
+                item_data[item_id] = {
+                    "main_category": data['main_category'],
+                    "title": data['title'],
+                    "average_rating": data['average_rating'],
+                    "rating_number": data['rating_number'],
+                    "features": data['features'],
+                    "description": data['description'],
+                    "price": data['price'],
+                    "images": data['images'],
+                    "store": data['store'],
+                    "categories": data['categories'],
+                    "details": data['details']
+                }
+        return item_data
 
     @staticmethod
     def load_movielens_data(filepath, encoding='ISO-8859-1'):
@@ -465,8 +490,7 @@ class ItemTower(nn.Module):
 
 if __name__ == "__main__":
     item_tower = ItemTower(hidden_factor=64, pretrained_model_name="bert-base-uncased", max_length=128,
-                           data_filepath="D:/Code/graduation_design/data/kuairec/data/kuairec_caption_category.csv",
-                           cache_path="D:/Code/graduation_design/llm_emb/kuairec/bert_emb64.npy",
+                           data_filepath="D:/Code/graduation_design/data/Toys_and_Games/item.csv",
+                           cache_path="D:/Code/graduation_design/llm_emb/Toys_and_Games/bert_emb64.npy",
                            device="cuda", num_transformer_layers=2, num_attention_heads=4,
                            intermediate_size=256, dropout_rate=0.1)
-    item_tower._precompute_item_embeddings()

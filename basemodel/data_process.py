@@ -114,7 +114,8 @@ class Data(object):
             'ml-1m': (['user', 'item', 'G'], [], ['G'], 10, 10, '.dat'),
             'magazine': (['user', 'item', 'G'], [], ['G'], 2, 2, '.dat'),
             'Office_Products': (['user', 'item', 'G'], [], ['G'], 0, 0, '.dat'),
-            'kuairec': (['user', 'item', 'G'], [], ['G'], 0, 0, '.dat')
+            'kuairec': (['user', 'item', 'G'], [], ['G'], 0, 0, '.dat'),
+            'Toys_and_Games': (['user', 'item', 'G'], [], ['G'], 0, 0, '.csv')
         }
 
         if self.name in entity_config:
@@ -267,7 +268,7 @@ class Data(object):
             `tuple`: 返回用户物品交互列表、用户数量、物品数量、用户ID映射字典、物品ID映射字典
         """
         if data_suffix == '.csv':
-            df = pd.read_csv(self.dir + 'ratings.csv')
+            df = pd.read_csv(self.dir + 'interaction.csv', names=['userId', 'itemId', 'rating', 'timestamp'])
         elif data_suffix == '.dat':
             df = pd.read_csv(self.dir + 'interaction.dat', sep=self.args['sep'], names=['userId', 'movieId', 'rating', 'timestamp'], engine='python')
         else:
@@ -315,11 +316,7 @@ class Data(object):
         item_entities = []
         file_path = self.dir + subdir
 
-        if file_path.endswith('.csv'):
-            items = pd.read_csv(file_path, engine='python')
-            item_entities = items.iloc[:, :2].values.tolist()  # 只取前两列
-            item_entities = [[str(x), str(y)] for x, y in item_entities]
-        elif self.dir.split('/')[-2] == 'ml-1m':
+        if self.dir.split('/')[-2] == 'ml-1m':
             items = pd.read_csv(file_path, sep='::', names=['movieId', 'title', 'genres'], engine='python', encoding=self.encoding)
             item_entities = items.iloc[:, :2].values.tolist()  # 只取前两列
             item_entities = [[str(x), str(y)] for x, y in item_entities]
@@ -331,6 +328,12 @@ class Data(object):
             items = pd.read_csv(file_path, sep='\t', names=['itemId', 'title'], engine='python')
             item_entities = items.iloc[:, :2].values.tolist()  # 只取前两列
             item_entities = [[str(x), str(y)] for x, y in item_entities]
+        elif self.dir.split('/')[-2] == 'Toys_and_Games':
+            item_entities = []
+            with open(file_path, 'r') as fp:
+                for line in tqdm(fp):
+                    data = json.loads(line.strip())
+                    item_entities.append([str(data['parent_asin']), str(data['title'])])
         else:
             with codecs.open(file_path, 'r', encoding=self.encoding) as rfile:  # iso-8859-15
                 for line in rfile:
