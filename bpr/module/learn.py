@@ -10,7 +10,7 @@ from transformers import AutoModel, AutoTokenizer
 
 class TransformerBlock(nn.Module):
     """
-    Transformer编码器块，使用因果注意力
+    Transformer编码器块，不使用因果注意力
     """
     def __init__(self, hidden_size, num_attention_heads, intermediate_size, dropout_rate=0.1):
         super(TransformerBlock, self).__init__()
@@ -25,25 +25,19 @@ class TransformerBlock(nn.Module):
         self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, x, attention_mask=None):
-        # 自注意力层，使用因果掩码
+        # 自注意力层，不使用因果掩码
         residual = x
         x = self.layer_norm1(x)
 
         # 转置为注意力机制需要的形状 [seq_len, batch_size, hidden_size]
         x = x.transpose(0, 1)
 
-        # 创建因果掩码
-        seq_len = x.size(0)
-        causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device) * float('-inf'), diagonal=1)
-
         # 应用注意力
         if attention_mask is not None:
-            # 组合因果掩码和注意力掩码
+            # 转换注意力掩码形状
             attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
             attention_mask = (1.0 - attention_mask) * -10000.0
-            causal_mask = causal_mask + attention_mask
-
-        x, _ = self.attention(x, x, x, attn_mask=causal_mask)
+        x, _ = self.attention(x, x, x, attn_mask=attention_mask)
         x = x.transpose(0, 1)  # 转回 [batch_size, seq_len, hidden_size]
         x = self.dropout(x)
         x = residual + x
@@ -143,17 +137,11 @@ class ContentExtractionModule(nn.Module):
 
 
 class PreferenceAlignmentModule(nn.Module):
-    """
-    偏好对齐模块 (PAL)
-    捕捉用户偏好，并根据内容嵌入序列输出用户嵌入
-    """
-    def __init__(self, hidden_factor=64, num_transformer_layers=12, num_attention_heads=12,
-                 intermediate_size=3072, max_seq_length=50, dropout_rate=0.1):
+    def __init__(self, hidden_factor, num_transformer_layers, num_attention_heads,
+                 intermediate_size, max_seq_length, dropout_rate):
         super(PreferenceAlignmentModule, self).__init__()
         self.hidden_factor = hidden_factor
         self.max_seq_length = max_seq_length
-
-        # 内容适配器 - 维度转换
         self.content_adaptor = nn.Linear(hidden_factor, hidden_factor)
 
         # 位置编码
@@ -175,24 +163,33 @@ class PreferenceAlignmentModule(nn.Module):
         self.dropout = nn.Dropout(dropout_rate)
         self.layer_norm = nn.LayerNorm(hidden_factor)
 
-    def forward(self, content_embedding_sequence):
+    def forward(self, item_embedding):
         """
         前向传播
         
         Args:
-            content_embedding_sequence (torch.Tensor): 内容嵌入序列 [batch_size, seq_length, hidden_factor]
+            item_embedding (torch.Tensor): 内容嵌入序列，形状可以是
+                1. [batch_size, n_base_model, seq_length, hidden_factor]
+                2. [batch_size, seq_length, hidden_factor]
 
         Returns:
-            refined_embeddings (torch.Tensor): 优化后的嵌入序列 [batch_size, seq_length, hidden_factor]
+            refined_embeddings (torch.Tensor): 优化后的嵌入序列，形状与输入相同
         """
-        batch_size, seq_length, _ = content_embedding_sequence.size()
+        if item_embedding.dim() == 4:
+            # 如果输入是 [batch_size, n_base_model, seq_length, hidden_factor]
+            batch_size, n_base_model, seq_length, hidden_dim = item_embedding.size()
+            item_embedding = item_embedding.view(-1, seq_length, hidden_dim)
+        else:
+            # 输入是 [batch_size, seq_length, hidden_factor]
+            batch_size, seq_length, hidden_dim = item_embedding.size()
+            n_base_model = None
 
         # 应用内容适配器
-        adapted_embeddings = self.content_adaptor(content_embedding_sequence)
+        adapted_embeddings = self.content_adaptor(item_embedding)
 
         # 添加位置编码
         position_ids = torch.arange(seq_length, dtype=torch.long, device=adapted_embeddings.device)
-        position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
+        position_ids = position_ids.unsqueeze(0).expand(adapted_embeddings.size(0), -1)
         position_embeddings = self.position_embeddings(position_ids)
         
         embeddings = adapted_embeddings + position_embeddings
@@ -206,6 +203,10 @@ class PreferenceAlignmentModule(nn.Module):
 
         # 保持序列维度，应用在线投影层到每个时间步
         refined_embeddings = self.online_projection(hidden_states)
+
+        if n_base_model is not None:
+            # 如果输入是 [batch_size, n_base_model, seq_length, hidden_factor]，恢复形状
+            refined_embeddings = refined_embeddings.view(batch_size, n_base_model, seq_length, hidden_dim)
         
         return refined_embeddings
 
@@ -215,12 +216,11 @@ class ItemTower(nn.Module):
                  data_filepath="D:/Code/graduation_design/data/ml-1m/movies.dat",
                  cache_path="D:/Code/graduation_design/data/ml-1m/item_embeddings.npy",
                  device=None, num_transformer_layers=2, num_attention_heads=4,
-                 intermediate_size=256, dropout_rate=0.1, id_to_item=None):
+                 intermediate_size=256, dropout_rate=0.1):
         super(ItemTower, self).__init__()
         self.device = device
         self.cache_path = cache_path
         self.hidden_factor = hidden_factor
-        self.id_to_item = id_to_item
         self.item_transform = nn.Sequential(
             nn.Linear(hidden_factor, hidden_factor),
             nn.ReLU(),
@@ -232,7 +232,7 @@ class ItemTower(nn.Module):
             num_transformer_layers=num_transformer_layers,
             num_attention_heads=num_attention_heads,
             intermediate_size=intermediate_size,
-            max_seq_length=max_length,  # 默认最大序列长度
+            max_seq_length=max_length,
             dropout_rate=dropout_rate
         )
 
@@ -449,13 +449,13 @@ class ItemTower(nn.Module):
         前向传播
 
         Args:
-            item_id (torch.Tensor): 物品ID, [1, 3952]
+            item_ids (torch.Tensor): 物品ID, [1, 3952]
             type (str): 类型, 'base_model' / 'user_seq' / 'single_item'
 
         Returns:
             item_embedding (torch.Tensor): 物品嵌入，形状为 [batch_size, seq, hidden_factor]，其中 batch_size 为批次大小，seq 为序列长度，hidden_factor 为隐藏层维度
         """
-        if type == 'base_model':
+        if type == 'base_model':  # [bc, n_base_model, seq_len]
             batch_size, n_base_model, seq_len = item_ids.shape
             item_ids_np = item_ids.cpu().numpy()
             item_ids_flat = item_ids_np.reshape(-1)
@@ -464,8 +464,9 @@ class ItemTower(nn.Module):
             item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
             item_embeddings = self.item_embeddings[item_indices]
             item_embeddings = item_embeddings.reshape(batch_size, n_base_model, seq_len, -1)
+            item_embeddings = self.preference_alignment(item_embeddings)
 
-        elif type == 'user_seq':
+        elif type == 'user_seq':  # [bc, seq_len]
             batch_size, seq_len = item_ids.shape
             item_ids_np = item_ids.cpu().numpy()
             item_ids_flat = item_ids_np.reshape(-1)
@@ -474,8 +475,9 @@ class ItemTower(nn.Module):
             item_indices = torch.tensor(item_ids_mapped, device=item_ids.device)
             item_embeddings = self.item_embeddings[item_indices]
             item_embeddings = item_embeddings.reshape(batch_size, seq_len, -1)
+            item_embeddings = self.preference_alignment(item_embeddings)
 
-        elif type == 'single_item':
+        elif type == 'single_item':  # [bc]
             item_ids_np = item_ids.cpu().numpy()
             # item_ids_mapped = np.array([self.item_to_idx.get(str(self.id_to_item[id]), len(self.item_data)) for id in item_ids_np])
             item_ids_mapped = np.array([self.item_to_idx[str(id)] for id in item_ids_np])

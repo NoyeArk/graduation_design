@@ -1,9 +1,12 @@
 __pycache__/*
 basemodel/__pycache__/*
-data/*
 old_datasets/*
 basemodel/model/__pycache__/*
-datasets/*
+data/Amazon_Fashion/*
+data/kuairec/*
+data/magazine/*
+data/Office_Products/*
+data/Toys_and_Games/*
 rec/__pycache__/*
 rec/model/__pycache__/*
 rec/module/__pycache__/*
@@ -25,3 +28,12 @@ bpr/ml_ckpt/*
 bce/ckpt_qwen_reg_div_last/*
 bpr/ckpt_ensrec_amazon/*
 bpr/ckpt_ensrec_kuairec/*
+bpr/ckpt/*
+bpr/ckpt_bert_pal_amazon/*
+bpr/ckpt_new_pal_amazon/*
+bpr/ckpt_new_pal_div5_reg5_amazon/*
+bpr/ckpt_new_pal_div10_reg10_amazon/*
+bpr/ckpt_new_pal_div2_reg2_amazon/*
+bpr/ckpt_new_pal_div10_reg5_amazon/*
+bpr/ckpt_new_pal_div5_reg10_amazon/*
+

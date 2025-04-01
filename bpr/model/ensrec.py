@@ -27,7 +27,10 @@ class EnsRec(nn.Module):
                                    data_filepath=f"{self.data_args['item_path']}",
                                    cache_path=f"{self.data_args['item_emb_path']}",
                                    device=self.device,
-                                   id_to_item=id_to_item)
+                                   num_transformer_layers=self.args['num_transformer_layers'],
+                                   num_attention_heads=self.args['num_attention_heads'],
+                                   intermediate_size=self.args['intermediate_size'],
+                                   dropout_rate=self.args['dropout_rate'])
         self.llm_projection = nn.Linear(self.item_tower.item_embeddings.shape[-1], self.hidden_dim)
 
         self.to(self.device)
