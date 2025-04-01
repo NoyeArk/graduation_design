@@ -28,7 +28,6 @@ bpr/ml_ckpt/*
 bce/ckpt_qwen_reg_div_last/*
 bpr/ckpt_ensrec_amazon/*
 bpr/ckpt_ensrec_kuairec/*
-bpr/ckpt/*
 bpr/ckpt_bert_pal_amazon/*
 bpr/ckpt_new_pal_amazon/*
 bpr/ckpt_new_pal_div5_reg5_amazon/*
