@@ -10,6 +10,8 @@ from torch.utils.tensorboard import SummaryWriter
 from data import Data, SeqBPRDataset
 from model.model_factory import get_model
 
+from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
+
 
 def nDCG(rec_items, test_set):
     DCG = lambda x: np.sum(x / np.log(np.arange(2, len(x) + 2)))
@@ -42,6 +44,7 @@ def train(args, data, model, train_loader, test_loader, optimizer):
     train.writer = SummaryWriter(f'runs/{args["model"]["name"]}_train')
     train.global_step = 0
 
+    ndcgs = []
     for epoch in range(args['epoch']):
         model.train()
         with tqdm(train_loader, desc=f"Epoch {epoch+1}/{args['epoch']}") as pbar:
@@ -66,13 +69,16 @@ def train(args, data, model, train_loader, test_loader, optimizer):
 
         ndcg = test(data, model, test_loader, args['topk'])
         print(f"测试集/nDCG: {ndcg:.4f}")
+        ndcgs.append(ndcg)
 
-        if not os.path.exists(f"ckpt_{args['model']['name']}"):
-            os.makedirs(f"ckpt_{args['model']['name']}")
-        ckpt_name = f"ckpt_{args['model']['name']}/epoch{epoch+1}_{round(ndcg, 4)}.pth"
-        torch.save(model.state_dict(), ckpt_name)
-        print(f"模型已保存: {ckpt_name}")
+        # dir = f"ckpt_{args['model']['name']}_{args['data']['name']}"
+        # if not os.path.exists(dir):
+        #     os.makedirs(dir)
+        # ckpt_name = f"{dir}/epoch{epoch+1}_{round(ndcg, 4)}.pth"
+        # torch.save(model.state_dict(), ckpt_name)
+        # print(f"模型已保存: {ckpt_name}")
 
+    return np.mean(ndcgs)
 
 def test(data, model, test_loader, topk):
     model.eval()
@@ -111,8 +117,32 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False)
 
-    model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952, data.id_to_item)
+    model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952)
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
     # model.load_state_dict(torch.load("ckpt_new_pal_div2_reg2_amazon/epoch10_0.2322.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)
+
+    # def objective(params):
+    #     args['model']['div_tradeoff'] = params['div_tradeoff']
+    #     args['model']['reg_tradeoff'] = params['reg_tradeoff']
+    #     model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952, data.id_to_item)
+    #     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
+    #     acc = train(args, data, model, train_loader, test_loader, optimizer)
+    #     return {'loss': -acc, 'status': STATUS_OK}
+
+    # space = {
+    #     'div_tradeoff': hp.quniform('div_tradeoff', 1, 100, 1),
+    #     'reg_tradeoff': hp.quniform('reg_tradeoff', 1, 100, 1),
+    # }
+
+    # trials = Trials()
+    # best = fmin(
+    #     fn=objective,
+    #     space=space,
+    #     algo=tpe.suggest,
+    #     max_evals=30,
+    #     trials=trials
+    # )
+
+    # print("Best hyperparameters:", best)

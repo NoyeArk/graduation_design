@@ -2,21 +2,39 @@ base_path: &base_path "D:/Code/graduation_design/"
 # base_path: &base_path "/root/autodl-tmp/graduation_design/"
 
 data:
-  sep: "::"
   maxlen: 20
+  is_sample: false
   base_model_topk: 100
-  train_test_split: 0.99
   device: &device "cuda"
-  name: &dataset_name "ml-1m"
+  name: &dataset_name "Toys_and_Games"
 
-  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item.dat"]
+  ml-1m:
+    sep: "::"
+    train_test_split: 0.99
+    num_negatives: 1
+    user_threshold: 10
+    item_threshold: 10
+    rating_threshold: 2
+
+  Toys_and_Games:
+    sep: ","
+    train_test_split: 0.8
+    num_negatives: 1
+    user_threshold: 0
+    item_threshold: 0
+    rating_threshold: 0
+
+  kuairec:
+    sep: ","
+    train_test_split: 0.99
+    num_negatives: 1
+    user_threshold: 0
+    item_threshold: 0
+    rating_threshold: 0
+
+  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item.csv"]
   item_emb_path: !!python/object/apply:os.path.join [*base_path, "llm_emb", *dataset_name, "qwen_emb64.npy"]
-  path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.dat']
-
-  num_negatives: 1
-  user_threshold: 10
-  item_threshold: 10
-  rating_threshold: 2
+  path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.csv']
 
   base_model:
     - "acf"
@@ -29,18 +47,23 @@ data:
   base_model_path: !!python/object/apply:os.path.join [*base_path, "base_model_results", *dataset_name]
 
 model:
-  name: "qwen_reg_div_last"
+  name: "hyper_div27_reg54"
+  type: "ensrec"
   lr: 0.001
   hidden_dim: 64
   device: *device
-  type: "bpr_ensrec"
   n_weak_learners: 10
   pretrain_llm: "Qwen/Qwen2.5-7B-Instruct-1M"
 
   use_div: true
-  div_tradeoff: 1
+  div_tradeoff: 27
   use_reg: true
-  reg_tradeoff: 1
+  reg_tradeoff: 54
+
+  num_transformer_layers: 4
+  num_attention_heads: 4
+  intermediate_size: 256
+  dropout_rate: 0.1
 
 topk: 10
 epoch: 10

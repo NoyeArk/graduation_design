@@ -3,9 +3,9 @@ from model.ensrec import EnsRec
 from model.stack import StackingModel
 
 
-def get_model(model_type, args, data_args, n_user, n_item, id_to_item):
+def get_model(model_type, args, data_args, n_user, n_item):
     if model_type == 'ensrec':
-        return EnsRec(args, data_args, n_user, id_to_item)
+        return EnsRec(args, data_args, n_user)
     elif model_type == 'aem':
         return AEM(args, data_args, n_user, n_item)
     elif model_type == 'stacking':

@@ -7,7 +7,7 @@ from module.learn import ItemTower
 
 
 class EnsRec(nn.Module):
-    def __init__(self, args, data_args, n_user, id_to_item):
+    def __init__(self, args, data_args, n_user):
         super(EnsRec, self).__init__()
         self.args = args
         self.data_args = data_args
