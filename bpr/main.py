@@ -120,7 +120,7 @@ if __name__ == '__main__':
     model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, args['data'][args['data']['name']]['n_item'])
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    # model.load_state_dict(torch.load("D:\Code\graduation_design\\bpr\ckpt_stack_ml-1m\epoch16_0.4186.pth"))
+    # model.load_state_dict(torch.load("D:\Code\graduation_design\\bpr\ckpt\kuairec\stack_0.4256.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)
     # print(test(data, model, test_loader, 10))
 

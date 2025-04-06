@@ -243,17 +243,11 @@ class ItemTower(nn.Module):
 
         self.layer_norm = nn.LayerNorm(hidden_factor)
         self.item_data = self.load_movielens_data(data_filepath)
-        if data_filepath == "D:/Code/graduation_design/data\kuairec\item.dat":
-            self.cex = ContentExtractionModule(
-                hidden_factor=hidden_factor,
-                pretrained_model_name=pretrained_model_name,
-                max_length=max_length
-            )
-            self.item_data = {}
-            with open(data_filepath, 'r') as fp:
-                for line in tqdm(fp):
-                    item_id = line.strip().split(',')[0]
-                    self.item_data[item_id] = line.strip().split(',')[1]
+        self.item_data = {}
+        with open(data_filepath, 'r') as fp:
+            for line in tqdm(fp):
+                item_id = line.strip().split(',')[0]
+                self.item_data[item_id] = line.strip().split(',')[1]
         self.item_to_idx = {item_id: idx for idx, item_id in enumerate(list(self.item_data.keys()))}
         self.item_to_idx['0'] = len(self.item_data)
 
