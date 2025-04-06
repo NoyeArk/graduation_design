@@ -6,7 +6,7 @@ data:
   is_sample: false
   base_model_topk: 100
   device: &device "cuda"
-  name: &dataset_name "Toys_and_Games"
+  name: &dataset_name "ml-1m"
 
   ml-1m:
     sep: "::"
@@ -32,9 +32,9 @@ data:
     item_threshold: 0
     rating_threshold: 0
 
-  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item.csv"]
+  item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item.dat"]
   item_emb_path: !!python/object/apply:os.path.join [*base_path, "llm_emb", *dataset_name, "qwen_emb64.npy"]
-  path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.csv']
+  path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.dat']
 
   base_model:
     - "acf"

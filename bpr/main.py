@@ -71,18 +71,18 @@ def train(args, data, model, train_loader, test_loader, optimizer):
         print(f"测试集/nDCG: {ndcg:.4f}")
         ndcgs.append(ndcg)
 
-        # dir = f"ckpt_{args['model']['name']}_{args['data']['name']}"
-        # if not os.path.exists(dir):
-        #     os.makedirs(dir)
-        # ckpt_name = f"{dir}/epoch{epoch+1}_{round(ndcg, 4)}.pth"
-        # torch.save(model.state_dict(), ckpt_name)
-        # print(f"模型已保存: {ckpt_name}")
+        dir = f"ckpt_{args['model']['name']}_{args['data']['name']}"
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+        ckpt_name = f"{dir}/epoch{epoch+1}_{round(ndcg, 4)}.pth"
+        torch.save(model.state_dict(), ckpt_name)
+        print(f"模型已保存: {ckpt_name}")
 
     return np.mean(ndcgs)
 
 def test(data, model, test_loader, topk):
     model.eval()
-    ndcg_scores = []
+    metrics = []
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="计算测试集指标"):
@@ -100,8 +100,8 @@ def test(data, model, test_loader, topk):
                 predicted_item_ids = np.array([indices[i].cpu().numpy().tolist()])
                 ndcg = nDCG(np.array(predicted_item_ids), [true_item_ids])
 
-                ndcg_scores.append(ndcg)
-    return np.mean(ndcg_scores)
+                metrics.append(ndcg)
+    return np.mean(metrics)
 
 
 if __name__ == '__main__':
@@ -117,11 +117,12 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False)
 
-    model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, 3952)
+    model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, args['data'][args['data']['name']]['n_item'])
     optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    # model.load_state_dict(torch.load("ckpt_new_pal_div2_reg2_amazon/epoch10_0.2322.pth"))
+    # model.load_state_dict(torch.load("D:\Code\graduation_design\\bpr\ckpt_stack_ml-1m\epoch16_0.4186.pth"))
     train(args, data, model, train_loader, test_loader, optimizer)
+    # print(test(data, model, test_loader, 10))
 
     # def objective(params):
     #     args['model']['div_tradeoff'] = params['div_tradeoff']

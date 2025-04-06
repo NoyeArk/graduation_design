@@ -20,6 +20,7 @@ class StackingModel(nn.Module):
             nn.Dropout(0.5),                   # 添加dropout层
             nn.Linear(32, 1)                   # 输出层
         )
+        self.to(self.device)
 
     def forward(self, batch, is_test=False):
         if is_test:

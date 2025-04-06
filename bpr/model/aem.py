@@ -5,7 +5,6 @@ import torch.nn.functional as F
 
 class AEM(nn.Module):
     def __init__(self, args, data_args, n_user, n_item):
-        print(n_user, n_item)
         super(AEM, self).__init__()
         self.args = args
         self.data_args = data_args
