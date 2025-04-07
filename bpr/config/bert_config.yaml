@@ -6,29 +6,30 @@ data:
   is_sample: false
   base_model_topk: 100
   device: &device "cuda"
-  name: &dataset_name "Toys_and_Games"
+  name: &dataset_name "kuairec"
 
   ml-1m:
     sep: "::"
+    n_item: 3952
     train_test_split: 0.99
     num_negatives: 1
     user_threshold: 10
     item_threshold: 10
     rating_threshold: 2
 
-  Toys_and_Games:
+  kuairec:
     sep: ","
-    n_item: 27907
-    train_test_split: 0.9
+    n_item: 10728
+    train_test_split: 0.99
     num_negatives: 1
     user_threshold: 0
     item_threshold: 0
     rating_threshold: 0
 
-  kuairec:
+  Toys_and_Games:
     sep: ","
-    n_item: 3327
-    train_test_split: 0.99
+    n_item: 27907
+    train_test_split: 0.9
     num_negatives: 1
     user_threshold: 0
     item_threshold: 0
@@ -57,9 +58,9 @@ model:
   pretrain_llm: "bert-base-uncased"
 
   use_div: true
-  div_tradeoff: 2
+  div_tradeoff: 3
   use_reg: true
-  reg_tradeoff: 2
+  reg_tradeoff: 3
 
   num_transformer_layers: 4
   num_attention_heads: 8
