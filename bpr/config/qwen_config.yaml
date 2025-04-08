@@ -1,12 +1,13 @@
-base_path: &base_path "D:/Code/graduation_design/"
+# base_path: &base_path "D:/Code/graduation_design/"
+base_path: &base_path "/Users/horiki/Code/graduation_design/"
 # base_path: &base_path "/root/graduation_design/"
 
 data:
   maxlen: 20
   is_sample: false
   base_model_topk: 100
-  device: &device "cuda"
-  name: &dataset_name "ml-1m"
+  device: &device "cpu"
+  name: &dataset_name "kuairec"
 
   ml-1m:
     sep: "::"
@@ -28,7 +29,7 @@ data:
 
   kuairec:
     sep: ","
-    n_item: 3327
+    n_item: 10728
     train_test_split: 0.99
     num_negatives: 1
     user_threshold: 0

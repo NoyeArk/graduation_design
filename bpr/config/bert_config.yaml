@@ -1,11 +1,12 @@
-base_path: &base_path "D:/Code/graduation_design/"
+# base_path: &base_path "D:/Code/graduation_design/"
+base_path: &base_path "/Users/horiki/Code/graduation_design/"
 # base_path: &base_path "/root/autodl-tmp/graduation_design/"
 
 data:
   maxlen: 20
   is_sample: false
   base_model_topk: 100
-  device: &device "cuda"
+  device: &device "cpu"
   name: &dataset_name "kuairec"
 
   ml-1m:
@@ -36,8 +37,8 @@ data:
     rating_threshold: 0
 
   item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item.csv"]
+  path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "interaction.csv"]
   item_emb_path: !!python/object/apply:os.path.join [*base_path, "llm_emb", *dataset_name, "bert_emb64.npy"]
-  path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.csv']
 
   base_model:
     - "acf"
