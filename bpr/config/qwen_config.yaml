@@ -1,17 +1,17 @@
-# base_path: &base_path "D:/Code/graduation_design/"
-base_path: &base_path "/Users/horiki/Code/graduation_design/"
+base_path: &base_path "D:/Code/graduation_design/"
+# base_path: &base_path "/Users/horiki/Code/graduation_design/"
 # base_path: &base_path "/root/graduation_design/"
 
 data:
   maxlen: 20
   is_sample: false
   base_model_topk: 100
-  device: &device "cpu"
-  name: &dataset_name "ml-1m"
+  device: &device "cuda"
+  name: &dataset_name "Toys_and_Games"
 
   ml-1m:
     sep: "::"
-    n_item: 3952
+    n_item: 3953
     train_test_split: 0.99
     num_negatives: 1
     user_threshold: 10
@@ -36,6 +36,15 @@ data:
     item_threshold: 0
     rating_threshold: 0
 
+  kindle:
+    sep: ","
+    n_item: 10728
+    train_test_split: 0.99
+    num_negatives: 1
+    user_threshold: 0
+    item_threshold: 0
+    rating_threshold: 0
+
   item_path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, "item.csv"]
   item_emb_path: !!python/object/apply:os.path.join [*base_path, "llm_emb", *dataset_name, "qwen_emb64.npy"]
   path: !!python/object/apply:os.path.join [*base_path, "data", *dataset_name, 'interaction.csv']
@@ -51,10 +60,10 @@ data:
   base_model_path: !!python/object/apply:os.path.join [*base_path, "base_model_results", *dataset_name]
 
 model:
-  name: "ensrec"
-  type: "ensrec"
+  name: "ensrec_no_basemodel_no_llm_divsum_16"
+  type: "ensrec_no_basemodel_no_llm"
   lr: 0.001
-  hidden_dim: 64
+  hidden_dim: 16
   device: *device
   pretrain_llm: "Qwen/Qwen2.5-7B-Instruct-1M"
 

@@ -61,7 +61,7 @@ def train(args, data, model, train_loader, test_loader, optimizer):
 
                 pbar.set_postfix(
                     loss=f"{loss.item():.4f}",
-                    total_grad=f"{total_grad:.4f}"
+                    grad=f"{total_grad:.4f}"
                 )
 
                 train.writer.add_scalar('训练/损失', loss.item(), train.global_step)
@@ -71,7 +71,7 @@ def train(args, data, model, train_loader, test_loader, optimizer):
         print(f"测试集/nDCG: {ndcg:.4f}")
         ndcgs.append(ndcg)
 
-        dir = f"ckpt_{args['model']['name']}_{args['data']['name']}"
+        dir = f"ckpt_{args['model']['name']}_reg{args['model']['reg_tradeoff']}_{args['data']['name']}"
         if not os.path.exists(dir):
             os.makedirs(dir)
         ckpt_name = f"{dir}/epoch{epoch+1}_{round(ndcg, 4)}.pth"
@@ -94,8 +94,8 @@ def test(data, model, test_loader, topk):
                 pos_item = batch['pos_item'][i].item()
 
                 true_item_ids = data.user_interacted_item_ids[user_id]
-                true_item_ids = true_item_ids[true_item_ids.index(data.item_to_id[pos_item]) + 1:]
-                # true_item_ids = true_item_ids[true_item_ids.index(pos_item) + 1:]
+                # true_item_ids = true_item_ids[true_item_ids.index(data.item_to_id[pos_item]) + 1:]
+                true_item_ids = true_item_ids[true_item_ids.index(pos_item) + 1:]
 
                 predicted_item_ids = np.array([indices[i].cpu().numpy().tolist()])
                 ndcg = nDCG(np.array(predicted_item_ids), [true_item_ids])
@@ -117,11 +117,14 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False)
 
-    model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, args['data'][args['data']['name']]['n_item'])
-    optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
+    for reg_parameter in range(3, 11):
+        args['model']['reg_tradeoff'] = reg_parameter
+        print(args)
+        model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, args['data'][args['data']['name']]['n_item'])
+        optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-    # model.load_state_dict(torch.load("D:\Code\graduation_design\\bpr\ckpt\kuairec\stack_0.4256.pth"))
-    train(args, data, model, train_loader, test_loader, optimizer)
+        # model.load_state_dict(torch.load("D:\Code\graduation_design\\bpr\ckpt_new_ensrec_wgts_Toys_and_Games\epoch44_0.2649.pth"))
+        train(args, data, model, train_loader, test_loader, optimizer)
     # print(test(data, model, test_loader, 10))
 
     # def objective(params):

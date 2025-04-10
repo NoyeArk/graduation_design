@@ -224,11 +224,11 @@ class Data(Dataset):
 
                 # 获取用户交互过的item之前的seq_len个交互作为历史序列
                 item_idx = items.index(self.id_to_item[item_id])
-                user_history = items[max(0, item_idx - seq_len):item_idx]
+                user_history = item_ids[max(0, item_idx - seq_len):item_idx]
 
                 # 如果历史序列长度不足seq_len，则在前面填充0
                 if len(user_history) < seq_len:
-                    user_history = user_history + [0] * (seq_len - len(user_history))
+                    user_history = user_history + [-1] * (seq_len - len(user_history))
                 user_seq.append(user_history)
 
                 interaction_idx = self.get_interaction_index(user_id, item_id)
@@ -250,20 +250,18 @@ class Data(Dataset):
         all_scores = self.all_item_score(base_model_preds_test)
 
         # 将 base_model_preds 的索引从 [0, 3122] 转换为 [1, 3952]
-
-        # amazon
-        vectorized_id_map = np.vectorize(lambda x: self.id_to_item[x])
-        base_model_preds = vectorized_id_map(base_model_preds)
+        # vectorized_id_map = np.vectorize(lambda x: self.id_to_item[x])
+        # base_model_preds = vectorized_id_map(base_model_preds)
 
         for i in tqdm(range(train_size), desc=">>>> 构建训练集"):
             train_samples.append({
                 'user_id': user_item_pairs[i][0],  # 用户ID
                 'history_seq': user_seq[i],  # [seq_len]
-                'pos_item': self.id_to_item[user_item_pairs[i][1]],  # 正样本
-                'neg_item': self.id_to_item[neg_samples[i]],  # 负样本
+                # 'pos_item': self.id_to_item[user_item_pairs[i][1]],  # 正样本
+                # 'neg_item': self.id_to_item[neg_samples[i]],  # 负样本
                 # amazon
-                # 'pos_item': user_item_pairs[i][1],  # 正样本
-                # 'neg_item': neg_samples[i],  # 负样本
+                'pos_item': user_item_pairs[i][1],  # 正样本
+                'neg_item': neg_samples[i],  # 负样本
                 'pos_label': pos_labels[i],  # [k]
                 'neg_label': neg_labels[i],  # [k]
                 'base_model_preds': base_model_preds[i]  # [k, seq_len]
@@ -276,11 +274,11 @@ class Data(Dataset):
             test_samples.append({
                 'user_id': user_item_pairs[j][0],  # 用户ID
                 'history_seq': user_seq[j],  # [seq_len]
-                'pos_item': self.id_to_item[user_item_pairs[j][1]],  # 正样本
-                'neg_item': self.id_to_item[neg_samples[j]],  # 负样本
+                # 'pos_item': self.id_to_item[user_item_pairs[j][1]],  # 正样本
+                # 'neg_item': self.id_to_item[neg_samples[j]],  # 负样本
                 # amazon
-                # 'pos_item': user_item_pairs[j][1],  # 正样本
-                # 'neg_item': neg_samples[j],  # 负样本
+                'pos_item': user_item_pairs[j][1],  # 正样本
+                'neg_item': neg_samples[j],  # 负样本
                 'all_item_scores': all_scores[j - train_size],  # [k, all_items]
                 'base_model_preds': base_model_preds[j]  # [k, seq_len]
             })

@@ -10,7 +10,7 @@ data/Toys_and_Games/*
 rec/__pycache__/*
 rec/model/__pycache__/*
 rec/module/__pycache__/*
-base_model_results/*
+basemodel_results/*
 rec/bpr/__pycache__/*
 bpr/module/__pycache__/*
 score/module/__pycache__/*
@@ -38,3 +38,6 @@ bpr/ckpt_new_pal_div5_reg10_amazon/*
 bpr/ckpt_new_pal_div5_reg5_amazon_Toys_and_Games/*
 bpr/model/ensrec_ablation/__pycache__/*
 data/Toys_and_Games.zip
+experiment/*
+bpr/ckpt_new_ensrec_wgts_reg7_Toys_and_Games/*
+data/kindle/*

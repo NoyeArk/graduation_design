@@ -20,9 +20,6 @@ class DIEN(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(hidden_dim)
         
-        # 输出层
-        self.output_layer = nn.Linear(hidden_dim, 1)
-        
     def forward(self, seq_emb, target_emb):
         """
         Args:
@@ -35,7 +32,7 @@ class DIEN(nn.Module):
         h_gru = torch.zeros(batch_size, self.hidden_dim, device=seq_emb.device)
         h_augru = torch.zeros(batch_size, self.hidden_dim, device=seq_emb.device)
         final_outputs = []
-        
+
         for t in range(seq_len):
             # 获取当前时间步的物品embedding
             current_input = seq_emb[:, t, :]  # [batch_size, hidden_dim]

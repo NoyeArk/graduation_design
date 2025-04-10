@@ -115,7 +115,8 @@ class Data(object):
             'magazine': (['user', 'item', 'G'], [], ['G'], 2, 2, '.dat'),
             'Office_Products': (['user', 'item', 'G'], [], ['G'], 0, 0, '.dat'),
             'kuairec': (['user', 'item', 'G'], [], ['G'], 0, 0, '.dat'),
-            'Toys_and_Games': (['user', 'item', 'G'], [], ['G'], 0, 0, '.csv')
+            'Toys_and_Games': (['user', 'item', 'G'], [], ['G'], 0, 0, '.csv'),
+            'kindle': (['user', 'item', 'G'], [], ['G'], 0, 0, '.csv')
         }
 
         if self.name in entity_config:
@@ -318,6 +319,10 @@ class Data(object):
 
         if self.dir.split('/')[-2] == 'ml-1m':
             items = pd.read_csv(file_path, sep='::', names=['movieId', 'title', 'genres'], engine='python', encoding=self.encoding)
+            item_entities = items.iloc[:, :2].values.tolist()  # 只取前两列
+            item_entities = [[str(x), str(y)] for x, y in item_entities]
+        elif self.dir.split('/')[-2] == 'kindle':
+            items = pd.read_csv(file_path, sep='\t', names=['itemId', 'title'], engine='python')
             item_entities = items.iloc[:, :2].values.tolist()  # 只取前两列
             item_entities = [[str(x), str(y)] for x, y in item_entities]
         elif self.dir.split('/')[-2] == 'Office_Products':

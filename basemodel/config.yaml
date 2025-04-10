@@ -1,6 +1,6 @@
 seed: 0
 neighbor_cnt: 5
-model: "sasrec"
+model: "anam"
 
 lamda:
   acf: 0.001
@@ -18,6 +18,6 @@ dataset:
 train:
   factor: 64
   batch_size: 2048
-  epoch: 100
+  epoch: 150
   lr: 0.001
   optimizer: "AdamOptimizer"

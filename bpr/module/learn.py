@@ -237,11 +237,11 @@ class ItemTower(nn.Module):
         )
 
         self.layer_norm = nn.LayerNorm(hidden_factor)
-        if data_filepath.split('/')[-2] == "ml-1m":
+        if data_filepath.split('\\')[-2] == "ml-1m":
             self.item_data = self.load_movielens_data(data_filepath)
-        elif data_filepath.split('/')[-2] == "kuairec":
+        elif data_filepath.split('\\')[-2] == "kuairec":
             self.item_data = self.load_kuairec_data(data_filepath)
-        elif data_filepath.split('/')[-2] == "Toys_and_Games":
+        elif data_filepath.split('\\')[-2] == "Toys_and_Games":
             self.item_data = self.load_amazon_data(data_filepath)
         elif data_filepath.split('/')[-2] == "Office_Products":
             self.item_data = {}
@@ -294,7 +294,6 @@ class ItemTower(nn.Module):
                 item_embeddings_batch = self.layer_norm(item_embeddings_batch)
                 embeddings.append(item_embeddings_batch.cpu())
 
-        # 如果物品id超出范围，使用一个默认的模型嵌入
         with torch.no_grad():
             content_embeddings = self.cex([{"Unknown": "N/A"}], is_json=True)
             item_embeddings_batch = self.item_transform(content_embeddings)
@@ -333,7 +332,6 @@ class ItemTower(nn.Module):
                 item_embeddings_batch = self.layer_norm(item_embeddings_batch)
                 embeddings.append(item_embeddings_batch.cpu())
 
-        # 如果物品id超出范围，使用一个默认的模型嵌入
         movie_info = {
             'title': 'Unknown', 
             'category': 'Unknown',

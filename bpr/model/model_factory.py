@@ -1,11 +1,14 @@
 from model.aem import AEM
-from model.ensrec import EnsRec
+from model.ensrec_ablation.no_basemodel_no_llm import EnsRec
+from model.ensrec_gate import EnsRecGate
 from model.stack import StackingModel
 
 
 def get_model(model_type, args, data_args, n_user, n_item):
-    if model_type == 'ensrec':
-        return EnsRec(args, data_args, n_user)
+    if model_type == 'ensrec_no_basemodel_no_llm':
+        return EnsRec(args, data_args, n_user, n_item)
+    elif model_type == 'ensrec_gate':
+        return EnsRecGate(args, data_args, n_user, n_item)
     elif model_type == 'aem':
         return AEM(args, data_args, n_user, n_item)
     elif model_type == 'stack':
