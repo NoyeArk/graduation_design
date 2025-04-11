@@ -3,20 +3,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from module.dien import DIEN
-from module.learn import ItemTower
 
 
 class EnsRec(nn.Module):
     def __init__(self, args, data_args, n_user, n_item):
         super(EnsRec, self).__init__()
         self.args = args
-        self.data_args = data_args
+        self.is_toys_data = data_args['name'] == 'Toys_and_Games'
         self.n_user = n_user
         self.n_item = n_item + 1
         self.learning_rate = args['lr']
         self.hidden_dim = args['hidden_dim']
         self.n_base_model = len(data_args['base_model'])
-        self.seq_max_len = self.data_args['maxlen']
+        self.seq_max_len = data_args['maxlen']
         self.device = torch.device(args['device'])
 
         self.dien = DIEN(args['hidden_dim'])
@@ -44,8 +43,8 @@ class EnsRec(nn.Module):
             `dict`: 包含损失和预测结果的字典
         """
         user_emb = self.user_embeddings(batch['user_id'])  # bc, dim
-        user_interaction = self.item_embeddings(batch['user_seq'])  # bc, seq_len, dim
-        target_emb = self.item_embeddings(batch['pos_item'])  # bc, dim
+        user_interaction = self.item_embeddings(batch['user_seq'] + int(self.is_toys_data))  # bc, seq_len, dim
+        target_emb = self.item_embeddings(batch['pos_item'] + int(self.is_toys_data))  # bc, dim
         preference = self.dien(user_interaction, target_emb) + user_emb  # bc, dim
 
         # 计算基模型权重
@@ -62,7 +61,8 @@ class EnsRec(nn.Module):
         neg_scores = torch.sum(batch['neg_label'] * wgts, dim=1)  # bc
         loss = -torch.sum(torch.log(torch.sigmoid(pos_scores - neg_scores)))
 
-        loss += torch.sum((wgts - 1).pow(2))  # 惩罚权重接近 1 的情况
+        if self.is_toys_data:
+            loss += torch.sum((wgts - 1).pow(2))  # 惩罚专家失衡
 
         if self.args['use_div']:
             cov_wgt = torch.detach(wgts.unsqueeze(1) + wgts.unsqueeze(2))  # [bc, n_base_model, n_base_model]

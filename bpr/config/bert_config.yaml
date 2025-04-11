@@ -7,7 +7,7 @@ data:
   is_sample: false
   base_model_topk: 100
   device: &device "cuda"
-  name: &dataset_name "ml-1m"
+  name: &dataset_name "Toys_and_Games"
 
   kindle:
     sep: ","
@@ -60,7 +60,7 @@ data:
   base_model_path: !!python/object/apply:os.path.join [*base_path, "basemodel_results", *dataset_name]
 
 model:
-  name: "new_ensrec_wgts"
+  name: "new_ensrec_wgts_div4_reg2"
   type: "ensrec_no_basemodel_no_llm"
   lr: 0.001
   hidden_dim: 64
@@ -68,9 +68,9 @@ model:
   pretrain_llm: "bert-base-uncased"
 
   use_div: true
-  div_tradeoff: 1
+  div_tradeoff: 4
   use_reg: true
-  reg_tradeoff: 1
+  reg_tradeoff: 2
 
   num_transformer_layers: 4
   num_attention_heads: 8

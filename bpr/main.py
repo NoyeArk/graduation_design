@@ -71,10 +71,10 @@ def train(args, data, model, train_loader, test_loader, optimizer):
         print(f"测试集/nDCG: {ndcg:.4f}")
         ndcgs.append(ndcg)
 
-        dir = f"ckpt_{args['model']['name']}_reg{args['model']['reg_tradeoff']}_{args['data']['name']}"
+        dir = f"ckpt_{args['model']['name']}_{args['data']['name']}"
         if not os.path.exists(dir):
             os.makedirs(dir)
-        ckpt_name = f"{dir}/epoch{epoch+1}_{round(ndcg, 4)}.pth"
+        ckpt_name = f"{dir}/epoch{epoch+21}_{round(ndcg, 4)}.pth"
         torch.save(model.state_dict(), ckpt_name)
         print(f"模型已保存: {ckpt_name}")
 
@@ -117,14 +117,14 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False)
 
-    for reg_parameter in range(3, 11):
-        args['model']['reg_tradeoff'] = reg_parameter
-        print(args)
-        model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, args['data'][args['data']['name']]['n_item'])
-        optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
+    # for reg_parameter in range(3, 11):
+    #     args['model']['reg_tradeoff'] = reg_parameter
+    #     print(args)
+    model = get_model(args['model']['type'], args['model'], args['data'], data.n_user, args['data'][args['data']['name']]['n_item'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=args['model']['lr'])
 
-        # model.load_state_dict(torch.load("D:\Code\graduation_design\\bpr\ckpt_new_ensrec_wgts_Toys_and_Games\epoch44_0.2649.pth"))
-        train(args, data, model, train_loader, test_loader, optimizer)
+    model.load_state_dict(torch.load("ckpt_new_ensrec_wgts_div4_reg2_Toys_and_Games/epoch20_0.1797.pth"))
+    train(args, data, model, train_loader, test_loader, optimizer)
     # print(test(data, model, test_loader, 10))
 
     # def objective(params):

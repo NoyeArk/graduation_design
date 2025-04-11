@@ -7,7 +7,7 @@ class DIEN(nn.Module):
     def __init__(self, hidden_dim, num_heads=4, dropout=0.1):
         super().__init__()
         self.hidden_dim = hidden_dim
-        
+
         # GRU层 - 每个时间步一个GRU
         self.gru_cell = nn.GRUCell(hidden_dim, hidden_dim)
         
@@ -99,28 +99,3 @@ class AttentionLayer(nn.Module):
         attn_output = torch.matmul(attn_weights, v)  # [batch_size, 1, hidden_dim]
         
         return attn_output.squeeze(1)  # [batch_size, hidden_dim]
-
-# 使用示例
-def test_model():
-    num_items = 1000
-    embedding_dim = 64
-    hidden_dim = 128
-    batch_size = 32
-    seq_len = 50
-    
-    model = DIEN(
-        num_items=num_items,
-        embedding_dim=embedding_dim,
-        hidden_dim=hidden_dim
-    )
-
-    seq = torch.randint(0, num_items, (batch_size, seq_len))
-    target_items = torch.randint(0, num_items, (batch_size,))
-    
-    output = model(seq, target_items)
-    print(f"输入序列形状: {seq.shape}")
-    print(f"目标物品形状: {target_items.shape}")
-    print(f"输出形状: {output.shape}")
-
-if __name__ == "__main__":
-    test_model()
