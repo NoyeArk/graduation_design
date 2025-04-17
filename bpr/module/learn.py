@@ -237,11 +237,11 @@ class ItemTower(nn.Module):
         )
 
         self.layer_norm = nn.LayerNorm(hidden_factor)
-        if data_filepath.split('\\')[-2] == "ml-1m":
+        if data_filepath.split('/')[-2] == "ml-1m":
             self.item_data = self.load_movielens_data(data_filepath)
-        elif data_filepath.split('\\')[-2] == "kuairec":
+        elif data_filepath.split('/')[-2] == "kuairec":
             self.item_data = self.load_kuairec_data(data_filepath)
-        elif data_filepath.split('\\')[-2] == "Toys_and_Games":
+        elif data_filepath.split('/')[-2] == "Toys_and_Games":
             self.item_data = self.load_amazon_data(data_filepath)
         elif data_filepath.split('/')[-2] == "Office_Products":
             self.item_data = {}

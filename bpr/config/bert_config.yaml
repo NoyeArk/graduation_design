@@ -1,13 +1,13 @@
-base_path: &base_path "D:/Code/graduation_design/"
-# base_path: &base_path "/Users/horiki/Code/graduation_design/"
+# base_path: &base_path "D:/Code/graduation_design/"
+base_path: &base_path "/Users/horiki/Code/graduation_design/"
 # base_path: &base_path "/root/autodl-tmp/graduation_design/"
 
 data:
   maxlen: 20
   is_sample: false
   base_model_topk: 100
-  device: &device "cuda"
-  name: &dataset_name "Toys_and_Games"
+  device: &device "cpu"
+  name: &dataset_name "ml-1m"
 
   kindle:
     sep: ","
