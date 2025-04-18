@@ -2,11 +2,11 @@
 
 本项目为本科毕业设计，旨在通过实践巩固所学的推荐系统知识，并完成一个具有实际意义的应用或研究。
 
-![](ensrec.png)
+![](image/ensrec.png)
 
 实验结果：
 
-![](image.png)
+![](image/result.png)
 
 ## 项目结构
 
