@@ -13,7 +13,7 @@ lamda:
 dataset:
   sep: ","
   name: "Toys_and_Games"
-  path: "D:/Code/graduation_design/data/Toys_and_Games"
+  path: "../data/Toys_and_Games"
 
 train:
   factor: 64

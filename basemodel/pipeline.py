@@ -15,10 +15,12 @@ class Pipeline(object):
     def __init__(self, args, data):
         self.args = args
         self.data = data
-        self.batch_size = args['train']['batch_size']
-        # self.batch_size = args.batch_size
-        self.epoch = args['train']['epoch']
-        # self.epoch = args.epoch
+        if args['model'] == 'sasrec':
+            self.batch_size = args.batch_size
+            self.epoch = args.epoch
+        else:
+            self.batch_size = args['train']['batch_size']
+            self.epoch = args['train']['epoch']
         self.entity = self.data.entity
         self.user_side_entity = self.data.user_side_entity
         self.item_side_entity = self.data.item_side_entity
