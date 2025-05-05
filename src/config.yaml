@@ -7,9 +7,9 @@ data:
   is_sample: false
   base_model_topk: 100
   device: &device "cpu"
-  name: &dataset_name "MoiveLens-1M"
+  name: &dataset_name "MovieLens-1M"
 
-  MoiveLens-1M:
+  MovieLens-1M:
     sep: "::"
     n_item: 3952
     train_test_split: 0.99
@@ -27,7 +27,7 @@ data:
     item_threshold: 0
     rating_threshold: 0
 
-  Toys_and_Games:
+  Amazon:
     sep: ","
     n_item: 27907
     train_test_split: 0.9
