@@ -26,11 +26,12 @@ EnsRec的目标是为个性化推荐领域提供一种高效且易用的解决�
 ├── experiment       # 消融实验和超参搜索实验结果
 │   ├── ablation
 │   └── hyperparameter_learning
-├── ipynb           # jupyter notebook文件
-├── llm_emb         # 使用llm对不同数据集物品嵌入之后的结果
+├── ipynb            # jupyter notebook文件
+├── llm_emb          # 使用llm对不同数据集物品嵌入之后的结果
 │   ├── KuaiRec
 │   ├── MovieLens-1M
 │   └── Toys_and_Games
+├── llm_ensrec
 ├── Readme.md
 ├── requirements.txt
 └── src
@@ -62,13 +63,15 @@ pip install -r requirements.txt
 
 ### 准备数据集
 
-本文使用的数据集为三个：MovieLens-1M、KuaiRec 和 Toys_and_Games，可以从[链接](https://pan.baidu.com/s/1ZgtYXfAwQELQcPSiYVkm_Q?pwd=d4a2)进行下载。也可以直接下载处理好的数据格式：[链接](https://pan.baidu.com/s/1lJTwDEFEw7JF6MXErxHaNA?pwd=ihs7)进行下载。
+本文使用的数据集为三个：MovieLens-1M、KuaiRec 和 Toys_and_Games，原始数据集可以从[链接](https://pan.baidu.com/s/1ZgtYXfAwQELQcPSiYVkm_Q?pwd=d4a2)进行下载。
 
 每个数据集由三个文件构成：
 
 1. `interaction.csv`：包含用户-物品的交互
 2. `user.csv`（未使用）：每个用户的描述信息
 3. `item.csv`：每个物品的描述信息
+
+可以直接下载处理好的数据集：[链接](https://pan.baidu.com/s/1lJTwDEFEw7JF6MXErxHaNA?pwd=ihs7)，下载后将其放置 `./src/datasets` 目录下。
 
 ### 计算基模型推荐结果
 
