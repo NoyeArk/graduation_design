@@ -1,6 +1,15 @@
 # 基于集成学习的个性化推荐算法设计
 
-本项目为本科毕业设计，旨在通过实践巩固所学的推荐系统知识，并完成一个具有实际意义的应用或研究。
+EnsRec（Ensemble Recommendation）是一种基于集成学习的个性化推荐算法。该项目旨在通过结合多种推荐模型的优势，提升推荐系统的性能和准确性。通过对多个基模型的结果进行集成，EnsRec能够更好地捕捉用户偏好和物品特性，从而生成更精准的推荐结果。
+
+本项目的主要特点包括：
+
+1. **多模型集成**：支持多种推荐算法的集成，包括ACF、ANAM、Caser、FDSA、HARNN、PFMC和SASRec。
+2. **模块化设计**：项目结构清晰，便于扩展和维护。
+3. **多数据集支持**：支持MovieLens-1M、KuaiRec和Toys_and_Games等多个数据集。
+4. **实验验证**：通过消融实验和超参数搜索验证模型性能。
+
+EnsRec的目标是为个性化推荐领域提供一种高效且易用的解决方案，适用于学术研究和实际应用场景。
 
 ![](image/ensrec.png)
 
@@ -12,26 +21,26 @@
 
 ```
 .
-├── basemodel    # 基模型部分实现
-├── data         # 数据集
-├── experiment   # 实验权重
-│   ├── ablation  # 消融实验
-│   └── hyperparameter_learning  # 超参数搜索实验
-├── ipynb
-├── llm_emb
+├── basemodel        # 基模型部分实现
+├── data             # 数据集
+├── experiment       # 消融实验和超参搜索实验结果
+│   ├── ablation
+│   └── hyperparameter_learning
+├── ipynb           # jupyter notebook文件
+├── llm_emb         # 使用llm对不同数据集物品嵌入之后的结果
 │   ├── KuaiRec
 │   ├── MovieLens-1M
 │   └── Toys_and_Games
 ├── Readme.md
 ├── requirements.txt
-└── src  # EnsRec模型实现
-    ├── ckpt
-    ├── config.yaml
-    ├── data.py
-    ├── datasets
-    ├── infer.ipynb
+└── src
+    ├── ckpt         # 模型权重
+    ├── config.yaml  # 配置文件
+    ├── data.py      # 数据处理文件
+    ├── datasets     # 处理之后的数据集
+    ├── infer.ipynb  # 推荐指标计算
     ├── main.py
-    ├── model
+    ├── model        # 模型实现
     └── module
 ```
 
